@@ -214,23 +214,33 @@ struct SettingsView: View {
                             }
                         }
                         
-                        if !ollamaService.availableModels.isEmpty {
-                            Picker("Select Model", selection: $settings.modelName) {
+                        // Always show dropdown - use fetched models or fallback list
+                        Picker("Select Model", selection: $settings.modelName) {
+                            if !ollamaService.availableModels.isEmpty {
                                 ForEach(ollamaService.availableModels) { model in
-                                    HStack {
-                                        Text(model.name)
-                                        if !model.formattedSize.isEmpty {
-                                            Text("(\(model.formattedSize))")
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-                                    .tag(model.name)
+                                    Text(model.displayName).tag(model.name)
+                                }
+                            } else {
+                                // Fallback common models when server not reachable
+                                Text("qwen3:0.6b (Fastest)").tag("qwen3:0.6b")
+                                Text("qwen2.5:1.5b").tag("qwen2.5:1.5b")
+                                Text("gemma3:1b").tag("gemma3:1b")
+                                Text("qwen2.5:7b").tag("qwen2.5:7b")
+                                Text("qwen2.5-coder:7b").tag("qwen2.5-coder:7b")
+                                Text("llama3.2:1b").tag("llama3.2:1b")
+                                Text("llama3.2:3b").tag("llama3.2:3b")
+                                Text("pam:latest").tag("pam:latest")
+                                // Also include current model if not in list
+                                if !["qwen3:0.6b", "qwen2.5:1.5b", "gemma3:1b", "qwen2.5:7b", "qwen2.5-coder:7b", "llama3.2:1b", "llama3.2:3b", "pam:latest"].contains(settings.modelName) {
+                                    Text(settings.modelName).tag(settings.modelName)
                                 }
                             }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            
-                            // Show current model info
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        
+                        // Show model info or status
+                        if !ollamaService.availableModels.isEmpty {
                             if let currentModel = ollamaService.availableModels.first(where: { $0.name == settings.modelName }) {
                                 HStack(spacing: 8) {
                                     if let params = currentModel.parameterSize {
@@ -243,32 +253,16 @@ struct SettingsView: View {
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
-                                    if let family = currentModel.family {
-                                        Text(family)
-                                            .font(.caption)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(Color.blue.opacity(0.15))
-                                            .foregroundColor(.blue)
-                                            .clipShape(Capsule())
-                                    }
                                 }
                             }
+                        } else if let error = ollamaService.errorMessage {
+                            Text("⚠️ \(error)")
+                                .font(.caption)
+                                .foregroundColor(.orange)
                         } else {
-                            // Fallback to text field if models not loaded
-                            TextField("Model name", text: $settings.modelName)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.body, design: .monospaced))
-                            
-                            if let error = ollamaService.errorMessage {
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                            } else {
-                                Text("Tap refresh to load available models")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
+                            Text("Tap ↻ to load your models from server")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
                     .padding(.vertical, 4)
