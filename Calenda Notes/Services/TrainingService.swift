@@ -89,6 +89,14 @@ final class TrainingService: ObservableObject {
     func findMatch(for input: String) -> TrainedResponse? {
         let lowercased = input.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         
+        // Skip training for time/date questions - let quick actions handle these
+        let timeKeywords = ["time", "date", "day is it", "today's date", "what day", "what's the time"]
+        for keyword in timeKeywords {
+            if lowercased.contains(keyword) {
+                return nil
+            }
+        }
+        
         // Exact match first
         for trained in trainedResponses {
             if trained.triggers.contains(lowercased) {

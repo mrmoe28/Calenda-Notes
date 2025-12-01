@@ -395,17 +395,23 @@ final class ChatViewModel: ObservableObject {
             return .openMaps(query.isEmpty ? nil : query)
         }
         
-        // Date questions
-        if (lowercased.contains("what") || lowercased.contains("tell")) && 
-           (lowercased.contains("date") || lowercased.contains("day is it") || lowercased.contains("today")) &&
-           !lowercased.contains("calendar") && !lowercased.contains("event") {
-            return .tellDate
+        // Date questions - comprehensive matching
+        let dateQuestions = ["what day", "what date", "what's the date", "whats the date", "what is the date",
+                             "what's today", "whats today", "what is today", "today's date", "todays date",
+                             "what day is it", "what day is today", "tell me the date", "current date"]
+        for phrase in dateQuestions {
+            if lowercased.contains(phrase) && !lowercased.contains("calendar") && !lowercased.contains("event") {
+                return .tellDate
+            }
         }
         
-        // Time questions
-        if (lowercased.contains("what") || lowercased.contains("tell")) && 
-           lowercased.contains("time") && !lowercased.contains("event") {
-            return .tellTime
+        // Time questions - comprehensive matching
+        let timeQuestions = ["what time", "what's the time", "whats the time", "what is the time",
+                             "current time", "time is it", "tell me the time", "what time is it"]
+        for phrase in timeQuestions {
+            if lowercased.contains(phrase) {
+                return .tellTime
+            }
         }
         
         // Weather questions
@@ -497,13 +503,15 @@ final class ChatViewModel: ObservableObject {
             
         case .tellDate:
             let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE, MMMM d"
-            return formatter.string(from: Date())
+            formatter.dateFormat = "EEEE, MMMM d, yyyy"
+            let dateStr = formatter.string(from: Date())
+            return "It's \(dateStr)"
             
         case .tellTime:
             let formatter = DateFormatter()
             formatter.dateFormat = "h:mm a"
-            return formatter.string(from: Date())
+            let timeStr = formatter.string(from: Date())
+            return "It's \(timeStr)"
             
         case .getWeather:
             return await actionExecutor.getCurrentWeather()
