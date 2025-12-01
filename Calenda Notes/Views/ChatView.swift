@@ -266,17 +266,22 @@ struct ChatView: View {
         }
         // Speak Nova's responses when streaming finishes
         .onChange(of: viewModel.isStreaming) { wasStreaming, isStreaming in
-            // When streaming ends (was true, now false), speak the response
-            if wasStreaming && !isStreaming && settings.speakResponsesInChat {
-                // Find the last assistant message
-                if let lastMessage = viewModel.messages.last, 
-                   !lastMessage.isUser,
-                   lastMessage.id != lastSpokenMessageId {
-                    speakText(lastMessage.text)
-                    lastSpokenMessageId = lastMessage.id
-                }
-            }
+            handleStreamingChange(wasStreaming: wasStreaming, isStreaming: isStreaming)
         }
+    }
+    
+    // MARK: - Streaming Change Handler
+    
+    private func handleStreamingChange(wasStreaming: Bool, isStreaming: Bool) {
+        // When streaming ends (was true, now false), speak the response
+        guard wasStreaming && !isStreaming else { return }
+        guard settings.speakResponsesInChat else { return }
+        guard let lastMessage = viewModel.messages.last else { return }
+        guard !lastMessage.isUser else { return }
+        guard lastMessage.id != lastSpokenMessageId else { return }
+        
+        speakText(lastMessage.text)
+        lastSpokenMessageId = lastMessage.id
     }
     
     // MARK: - Text to Speech
