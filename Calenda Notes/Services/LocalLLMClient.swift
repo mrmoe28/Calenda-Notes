@@ -177,11 +177,23 @@ final class LocalLLMClient: LLMClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("keep-alive", forHTTPHeaderField: "Connection")  // Reuse connection
         request.httpBody = try JSONEncoder().encode(requestBody)
-        request.timeoutInterval = 120
+        request.timeoutInterval = 60  // Faster timeout
+        request.cachePolicy = .reloadIgnoringLocalCacheData  // No caching delays
         
         return request
     }
+    
+    // Shared session with optimized configuration for faster connections
+    private static let optimizedSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForConnect = 10  // Fast connect timeout
+        config.timeoutIntervalForResource = 60
+        config.httpMaximumConnectionsPerHost = 2
+        config.waitsForConnectivity = false  // Fail fast if no connection
+        return URLSession(configuration: config)
+    }()
     
     // MARK: - Non-Streaming (fallback)
     
@@ -190,7 +202,7 @@ final class LocalLLMClient: LLMClient {
         
         print("🔗 Sending non-streaming request")
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.optimizedSession.data(for: request)
         
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -215,7 +227,7 @@ final class LocalLLMClient: LLMClient {
         
         print("🔗 Sending streaming request")
         
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await Self.optimizedSession.bytes(for: request)
         
         guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
