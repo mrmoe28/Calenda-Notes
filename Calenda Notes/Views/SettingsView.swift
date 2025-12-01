@@ -9,6 +9,7 @@ import AVFoundation
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
     @ObservedObject var viewModel: ChatViewModel
+    @StateObject private var ollamaService = OllamaService.shared
     @Environment(\.dismiss) private var dismiss
     
     @State private var showClearMemoryAlert = false
@@ -126,15 +127,88 @@ struct SettingsView: View {
                         .pickerStyle(.menu)
                     }
                     
-                    // Model Name
+                    // Model Selection
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Model Name")
-                            .font(.headline)
-                        TextField("Model", text: $settings.modelName)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
+                        HStack {
+                            Text("Model")
+                                .font(.headline)
+                            Spacer()
+                            if ollamaService.isLoading {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Button(action: {
+                                    Task { await ollamaService.fetchModels() }
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                        
+                        if !ollamaService.availableModels.isEmpty {
+                            Picker("Select Model", selection: $settings.modelName) {
+                                ForEach(ollamaService.availableModels) { model in
+                                    HStack {
+                                        Text(model.name)
+                                        if !model.formattedSize.isEmpty {
+                                            Text("(\(model.formattedSize))")
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .tag(model.name)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            // Show current model info
+                            if let currentModel = ollamaService.availableModels.first(where: { $0.name == settings.modelName }) {
+                                HStack(spacing: 8) {
+                                    if let params = currentModel.parameterSize {
+                                        Label(params, systemImage: "cpu")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    if !currentModel.formattedSize.isEmpty {
+                                        Label(currentModel.formattedSize, systemImage: "internaldrive")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    if let family = currentModel.family {
+                                        Text(family)
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.blue.opacity(0.15))
+                                            .foregroundColor(.blue)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                        } else {
+                            // Fallback to text field if models not loaded
+                            TextField("Model name", text: $settings.modelName)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                            
+                            if let error = ollamaService.errorMessage {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            } else {
+                                Text("Tap refresh to load available models")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
+                    .onAppear {
+                        if ollamaService.availableModels.isEmpty {
+                            Task { await ollamaService.fetchModels() }
+                        }
+                    }
                     
                     // Server URL
                     VStack(alignment: .leading, spacing: 8) {
