@@ -34,8 +34,14 @@ final class VoiceService: NSObject, ObservableObject {
     // Interrupt detection
     private var interruptMonitoringEnabled = false
     private var interruptAudioLevel: Float = 0
-    private let interruptThreshold: Float = 0.15 // Sensitivity for detecting user speech
     private var interruptDetectionTimer: Timer?
+    private var consecutiveHighLevels: Int = 0  // Require sustained sound to interrupt
+    
+    /// Get interrupt threshold from settings (lower = more sensitive)
+    private var interruptThreshold: Float {
+        let saved = UserDefaults.standard.double(forKey: "interrupt_sensitivity")
+        return saved > 0 ? Float(saved) : 0.15
+    }
     
     override init() {
         super.init()
@@ -194,13 +200,13 @@ final class VoiceService: NSObject, ObservableObject {
             stopListening()
         }
         
-        // Configure audio session for playback
+        // Configure audio session for playback WITH microphone access for interrupts
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Use playback category for clearer audio output
-            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            // Use playAndRecord to allow interrupt detection while speaking
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("🔊 Audio session configured for playback")
+            print("🔊 Audio session configured for playback with interrupt detection")
         } catch {
             print("❌ Audio session error: \(error)")
             errorMessage = "Audio error: \(error.localizedDescription)"
@@ -241,6 +247,9 @@ final class VoiceService: NSObject, ObservableObject {
         
         print("🔊 Starting speech: \"\(text.prefix(50))...\"")
         synthesizer.speak(utterance)
+        
+        // Start monitoring for user interrupts
+        startInterruptMonitoring()
     }
     
     private var speakCompletion: (() -> Void)?
@@ -261,13 +270,20 @@ final class VoiceService: NSObject, ObservableObject {
     private func startInterruptMonitoring() {
         guard !interruptMonitoringEnabled else { return }
         interruptMonitoringEnabled = true
+        consecutiveHighLevels = 0
         
-        // Use a separate audio tap to monitor mic input while speaking
+        print("🎤 Starting interrupt monitoring (threshold: \(interruptThreshold))")
+        
+        // Small delay to let the speaker audio stabilize before monitoring
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.setupInterruptAudioTap()
+        }
+    }
+    
+    private func setupInterruptAudioTap() {
+        guard interruptMonitoringEnabled else { return }
+        
         do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-            try audioSession.setActive(true)
-            
             // Install tap for monitoring voice input
             let inputNode = audioEngine.inputNode
             let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -275,40 +291,52 @@ final class VoiceService: NSObject, ObservableObject {
             // Remove existing tap if any
             inputNode.removeTap(onBus: 0)
             
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+            inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { [weak self] buffer, _ in
                 guard let self = self else { return }
                 
-                // Calculate audio level
+                // Calculate audio level using RMS for better accuracy
                 let channelData = buffer.floatChannelData?[0]
                 let frameLength = Int(buffer.frameLength)
-                var sum: Float = 0
+                var sumSquares: Float = 0
                 for i in 0..<frameLength {
-                    sum += abs(channelData?[i] ?? 0)
+                    let sample = channelData?[i] ?? 0
+                    sumSquares += sample * sample
                 }
-                let average = sum / Float(frameLength)
-                let normalizedLevel = min(average * 50, 1.0)
+                let rms = sqrt(sumSquares / Float(frameLength))
+                let normalizedLevel = min(rms * 30, 1.0)
                 
                 DispatchQueue.main.async {
                     self.interruptAudioLevel = normalizedLevel
                     
-                    // Detect if user is speaking (audio above threshold)
-                    if self.isSpeaking && normalizedLevel > self.interruptThreshold {
-                        self.handleInterrupt()
+                    // Require sustained sound to avoid speaker feedback triggering interrupt
+                    if self.isSpeaking {
+                        if normalizedLevel > self.interruptThreshold {
+                            self.consecutiveHighLevels += 1
+                            // Require 3 consecutive high levels (~150ms of sustained speech)
+                            if self.consecutiveHighLevels >= 3 {
+                                self.handleInterrupt()
+                            }
+                        } else {
+                            self.consecutiveHighLevels = 0
+                        }
                     }
                 }
             }
             
             audioEngine.prepare()
             try audioEngine.start()
+            print("🎤 Interrupt monitoring active")
             
         } catch {
-            print("Interrupt monitoring error: \(error)")
+            print("❌ Interrupt monitoring error: \(error)")
+            interruptMonitoringEnabled = false
         }
     }
     
     private func stopInterruptMonitoring() {
         guard interruptMonitoringEnabled else { return }
         interruptMonitoringEnabled = false
+        consecutiveHighLevels = 0
         interruptDetectionTimer?.invalidate()
         interruptDetectionTimer = nil
         
@@ -316,13 +344,15 @@ final class VoiceService: NSObject, ObservableObject {
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
         }
+        print("🎤 Interrupt monitoring stopped")
     }
     
     private func handleInterrupt() {
         guard isSpeaking else { return }
         
-        print("🎤 User interrupt detected!")
+        print("🎤 User interrupt detected! Stopping speech...")
         wasInterrupted = true
+        consecutiveHighLevels = 0
         
         // Stop speaking immediately
         synthesizer.stopSpeaking(at: .immediate)
