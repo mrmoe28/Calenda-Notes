@@ -67,7 +67,7 @@ final class AppSettings: ObservableObject {
     private init() {
         // Load saved values or use defaults
         self.temperature = UserDefaults.standard.object(forKey: "llm_temperature") as? Double ?? 0.7
-        self.maxTokens = UserDefaults.standard.object(forKey: "llm_max_tokens") as? Int ?? 2048
+        self.maxTokens = UserDefaults.standard.object(forKey: "llm_max_tokens") as? Int ?? 512
         self.modelName = UserDefaults.standard.string(forKey: "llm_model_name") ?? "qwen3:0.6b"
         self.serverURL = UserDefaults.standard.string(forKey: "llm_server_url") ?? "http://10.0.0.17:11434/v1"
         

@@ -160,11 +160,11 @@ final class LocalLLMClient: LLMClient {
             allMessages.append(LLMMessage(role: "user", content: userInput))
         }
         
-        // Get settings
-        let settings = await MainActor.run { AppSettings.shared }
-        let temperature = await MainActor.run { settings.temperature }
-        let maxTokens = await MainActor.run { settings.maxTokens }
-        let modelName = await MainActor.run { settings.modelName }
+        // Get settings (single MainActor call for speed)
+        let (temperature, maxTokens, modelName) = await MainActor.run {
+            let s = AppSettings.shared
+            return (s.temperature, s.maxTokens, s.modelName)
+        }
         
         let requestBody = LLMChatRequest(
             model: modelName,

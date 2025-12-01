@@ -221,8 +221,10 @@ final class ChatViewModel: ObservableObject {
         
         Task {
             do {
-                // Build messages with system prompt and memory context
-                var historyForLLM = messages.map { msg in
+                // Build messages with system prompt - LIMIT HISTORY for speed
+                // Only send last 6 messages (3 exchanges) to keep context small
+                let recentMessages = messages.suffix(6)
+                var historyForLLM = recentMessages.map { msg in
                     ChatMessage(text: msg.text, isUser: msg.isUser, imageData: msg.imageData)
                 }
                 
@@ -243,11 +245,13 @@ final class ChatViewModel: ObservableObject {
                 let contextMessage = ChatMessage(text: visionPrompt, isUser: false)
                 historyForLLM.insert(contextMessage, at: 0)
                 
-                // Add relevant memory context if user's message might benefit from past context
-                let memoryContext = memoryService.getRelevantContext(for: messageText, maxEntries: 5)
-                if !memoryContext.isEmpty {
-                    let memoryMessage = ChatMessage(text: memoryContext, isUser: false)
-                    historyForLLM.insert(memoryMessage, at: 1)
+                // Add relevant memory context only for longer/complex messages (skip for speed on simple queries)
+                if messageText.count > 20 {
+                    let memoryContext = memoryService.getRelevantContext(for: messageText, maxEntries: 3)
+                    if !memoryContext.isEmpty {
+                        let memoryMessage = ChatMessage(text: memoryContext, isUser: false)
+                        historyForLLM.insert(memoryMessage, at: 1)
+                    }
                 }
                 
                 // Create a placeholder message for streaming
