@@ -28,9 +28,28 @@ final class TrainingService: ObservableObject {
     @Published var trainedResponses: [TrainedResponse] = []
     
     private let storageKey = "nova_trained_responses"
+    private let trainingVersion = 2  // Increment to force refresh
+    private let versionKey = "nova_training_version"
     
     private init() {
-        loadTraining()
+        // Check if we need to refresh training (version changed)
+        let savedVersion = UserDefaults.standard.integer(forKey: versionKey)
+        if savedVersion < trainingVersion {
+            // Clear old training and add new defaults
+            trainedResponses = []
+            UserDefaults.standard.removeObject(forKey: storageKey)
+            UserDefaults.standard.set(trainingVersion, forKey: versionKey)
+        } else {
+            loadTraining()
+        }
+        addDefaultTraining()
+    }
+    
+    /// Force refresh all training data
+    func refreshTraining() {
+        trainedResponses = []
+        UserDefaults.standard.removeObject(forKey: storageKey)
+        UserDefaults.standard.set(trainingVersion, forKey: versionKey)
         addDefaultTraining()
     }
     
