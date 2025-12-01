@@ -73,7 +73,7 @@ struct OllamaModel: Identifiable, Decodable, Hashable {
     }
 }
 
-struct OllamaModelsResponse: Codable {
+struct OllamaModelsResponse: Decodable {
     let models: [OllamaModel]
 }
 
