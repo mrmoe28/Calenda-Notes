@@ -189,6 +189,44 @@ final class VoiceService: NSObject, ObservableObject {
     
     // MARK: - Text to Speech
     
+    /// Add natural pauses to text for more human-like speech
+    private func addNaturalPauses(_ text: String) -> String {
+        var result = text
+        
+        // Add pauses after common transition words/phrases
+        let pauseAfter = [
+            "so,": "so...",
+            "well,": "well...",
+            "okay,": "okay...",
+            "alright,": "alright...",
+            "anyway,": "anyway...",
+            "basically,": "basically...",
+            "honestly,": "honestly...",
+            "actually,": "actually...",
+            "like,": "like...",
+            "you know,": "you know...",
+        ]
+        
+        for (from, to) in pauseAfter {
+            result = result.replacingOccurrences(of: from, with: to, options: .caseInsensitive)
+        }
+        
+        // Add slight pause before "and" in lists (comma before and)
+        result = result.replacingOccurrences(of: " and ", with: ", and ")
+        
+        // Add pause after colons
+        result = result.replacingOccurrences(of: ": ", with: ":... ")
+        
+        // Convert multiple options/items with commas to have breathing room
+        // Add pause after numbers in lists like "1." "2." etc
+        result = result.replacingOccurrences(of: #"(\d+)\."#, with: "$1...", options: .regularExpression)
+        
+        // Ensure sentences have proper pauses (add period if missing before new sentence)
+        result = result.replacingOccurrences(of: "  ", with: ". ")
+        
+        return result
+    }
+    
     func speak(_ text: String, onComplete: (() -> Void)? = nil) {
         // Stop any ongoing speech and listening
         if synthesizer.isSpeaking {
@@ -211,16 +249,20 @@ final class VoiceService: NSObject, ObservableObject {
             errorMessage = "Audio error: \(error.localizedDescription)"
         }
         
+        // Process text for natural pauses
+        let processedText = addNaturalPauses(text)
+        
         // Get settings from UserDefaults (thread-safe)
         let savedVoiceId = UserDefaults.standard.string(forKey: "voice_identifier") ?? ""
         let savedSpeed = UserDefaults.standard.double(forKey: "voice_speed")
         let savedPitch = UserDefaults.standard.double(forKey: "voice_pitch")
         
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = savedSpeed > 0 ? Float(savedSpeed) : 0.52
+        let utterance = AVSpeechUtterance(string: processedText)
+        // Slightly slower default rate for more natural pacing (0.48 instead of 0.52)
+        utterance.rate = savedSpeed > 0 ? Float(savedSpeed) : 0.48
         utterance.pitchMultiplier = savedPitch > 0 ? Float(savedPitch) : 1.0
         utterance.volume = 1.0
-        utterance.preUtteranceDelay = 0.0  // No delay before speaking
+        utterance.preUtteranceDelay = 0.1  // Small pause before speaking
         utterance.postUtteranceDelay = 0.0 // No delay after speaking
         
         // Use saved voice or find a good default
