@@ -6,8 +6,9 @@
 //
 
 import Foundation
+import Combine
 
-struct OllamaModel: Identifiable, Codable, Hashable {
+struct OllamaModel: Identifiable, Decodable, Hashable {
     var id: String { name }
     let name: String
     let size: Int64?

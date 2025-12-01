@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 
 struct TrainedResponse: Codable, Identifiable {
     let id: UUID
