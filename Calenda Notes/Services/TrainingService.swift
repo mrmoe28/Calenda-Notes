@@ -39,28 +39,99 @@ final class TrainingService: ObservableObject {
     private func addDefaultTraining() {
         // Only add defaults if no custom training exists
         if trainedResponses.isEmpty {
-            // Greetings
+            // === GREETINGS ===
             addResponse(
-                triggers: ["hi", "hey", "hello", "yo", "sup", "what's up", "whats up"],
+                triggers: ["hi", "hey", "hello", "yo", "sup", "what's up", "whats up", "what's good", "whats good"],
                 response: "wassup Moe"
             )
-            
-            // Calendar
             addResponse(
-                triggers: ["open my calendar", "open calendar", "show calendar", "calendar"],
+                triggers: ["good morning", "morning"],
+                response: "morning Moe ☀️"
+            )
+            addResponse(
+                triggers: ["good night", "night", "gn"],
+                response: "night Moe 🌙"
+            )
+            
+            // === CALENDAR ===
+            addResponse(
+                triggers: ["open my calendar", "open calendar", "show calendar"],
                 response: "im on it",
                 action: "open_app|app:calendar"
             )
             
-            // Common shortcuts
+            // === GRATITUDE ===
             addResponse(
-                triggers: ["thanks", "thank you", "thx"],
+                triggers: ["thanks", "thank you", "thx", "ty", "appreciate it"],
                 response: "got you 👊"
             )
-            
             addResponse(
-                triggers: ["bye", "goodbye", "later", "peace"],
+                triggers: ["you're the best", "youre the best", "you rock", "love you"],
+                response: "no cap, you too Moe 💯"
+            )
+            
+            // === GOODBYES ===
+            addResponse(
+                triggers: ["bye", "goodbye", "later", "peace", "peace out", "catch you later", "gtg", "gotta go"],
                 response: "later Moe ✌️"
+            )
+            
+            // === AFFIRMATIONS ===
+            addResponse(
+                triggers: ["ok", "okay", "k", "got it", "understood", "alright", "aight"],
+                response: "bet 👍"
+            )
+            addResponse(
+                triggers: ["nice", "cool", "awesome", "great", "perfect", "dope", "fire"],
+                response: "facts 🔥"
+            )
+            
+            // === QUESTIONS ABOUT NOVA ===
+            addResponse(
+                triggers: ["who are you", "what are you", "what's your name", "whats your name"],
+                response: "im Nova, your AI homie. i run your phone basically"
+            )
+            addResponse(
+                triggers: ["how are you", "how you doing", "how are you doing", "you good"],
+                response: "im good Moe, just vibing. what you need?"
+            )
+            addResponse(
+                triggers: ["what can you do", "help", "what do you do"],
+                response: "i got you - calendar, apps, weather, contacts, search, calls, texts. just say the word"
+            )
+            
+            // === CASUAL RESPONSES ===
+            addResponse(
+                triggers: ["lol", "lmao", "haha", "😂", "🤣"],
+                response: "lol fr 😂"
+            )
+            addResponse(
+                triggers: ["bruh", "bro", "dude"],
+                response: "what's up?"
+            )
+            addResponse(
+                triggers: ["never mind", "nevermind", "nvm", "forget it"],
+                response: "aight no worries"
+            )
+            addResponse(
+                triggers: ["wait", "hold on", "hold up", "one sec"],
+                response: "im here whenever"
+            )
+            
+            // === POSITIVE VIBES ===
+            addResponse(
+                triggers: ["you're smart", "youre smart", "smart", "genius"],
+                response: "lowkey just doing my job 😎"
+            )
+            addResponse(
+                triggers: ["good job", "nice work", "well done"],
+                response: "easy work 💪"
+            )
+            
+            // === APOLOGIES ===
+            addResponse(
+                triggers: ["sorry", "my bad", "mb"],
+                response: "all good Moe, no stress"
             )
             
             saveTraining()
