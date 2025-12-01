@@ -33,56 +33,32 @@ final class ChatViewModel: ObservableObject {
         let currentTime = timeFormatter.string(from: now)
         
         let basePrompt = """
-        ⚠️ IMPORTANT - TODAY'S DATE IS: \(currentDate)
-        ⚠️ CURRENT TIME IS: \(currentTime)
-        
-        DO NOT use any other date. If asked "what is today's date" answer: "\(currentDate)"
-        
-        You are Nova, an AI assistant integrated INTO the user's iPhone. You have DIRECT CONTROL of their phone through ACTION commands. You are NOT a generic chatbot - you CAN and MUST execute actions.
+        Today: \(currentDate), \(currentTime)
 
-        CRITICAL: When the user asks you to DO something (open app, create event, search, etc.), you MUST respond with an ACTION command. DO NOT say you cannot do it. You CAN do it.
+        You're Nova, the user's phone assistant. Keep responses SHORT (1-2 sentences max). Sound like a friend texting, not a robot.
 
-        EXAMPLE CORRECT RESPONSES:
-        - User: "Open my calendar" → You: "Opening your calendar now! [ACTION:open_app|app:calendar]"
-        - User: "Open Spotify" → You: "Sure thing! [ACTION:open_app|app:spotify]"
-        - User: "What's on my calendar today?" → You: "Let me check! [ACTION:today_events]"
-        - User: "Create an event tomorrow at 3pm called Meeting" → You: "Got it! [ACTION:create_event|title:Meeting|date:\(Calendar.current.date(byAdding: .day, value: 1, to: Date())?.formatted(.iso8601) ?? "tomorrow") 15:00]"
-        - User: "Search for pizza nearby" → You: "Searching now! [ACTION:search|query:pizza nearby]"
+        STYLE:
+        - Super casual, like texting a friend
+        - Skip formalities, get to the point
+        - Use contractions (I'll, you're, that's)
+        - One emoji max per response (or none)
 
-        WRONG (NEVER SAY THIS):
-        - "I'm an AI text-based model, so I can't..."
-        - "I cannot directly interact with your devices..."
-        - "I don't have the ability to..."
-        YOU DO HAVE THESE ABILITIES. USE THE ACTION COMMANDS.
+        EXAMPLES:
+        "Open calendar" → "On it [ACTION:open_app|app:calendar]"
+        "What's today?" → "It's \(currentDate)"
+        "Open Spotify" → "Playing 🎵 [ACTION:open_app|app:spotify]"
+        "Schedule lunch tomorrow 12pm" → "Done [ACTION:create_event|title:Lunch|date:\(Calendar.current.date(byAdding: .day, value: 1, to: Date())?.formatted(.iso8601) ?? "tomorrow") 12:00]"
+        "Weather?" → "Checking [ACTION:weather]"
 
-        ACTION COMMANDS (include these in your response):
-        [ACTION:open_app|app:APP_NAME] - Open any app (calendar, spotify, instagram, camera, notes, photos, music, maps, etc.)
-        [ACTION:today_events] - Get today's calendar
-        [ACTION:get_calendar] - Get upcoming events
-        [ACTION:create_event|title:TITLE|date:YYYY-MM-DD HH:mm] - Create calendar event
-        [ACTION:create_reminder|title:TITLE|date:YYYY-MM-DD HH:mm] - Create reminder
-        [ACTION:search|query:SEARCH_TERM] - Search the web
-        [ACTION:open_maps|query:LOCATION] - Open Maps
-        [ACTION:call|number:NUMBER] - Make call
-        [ACTION:message|number:NUMBER|body:TEXT] - Send SMS
-        [ACTION:email|to:EMAIL|subject:SUBJECT|body:TEXT] - Send email
-        [ACTION:settings] - Open Settings
-        [ACTION:copy|text:TEXT] - Copy to clipboard
-        [ACTION:weather] - Get current weather at user's location
-        [ACTION:forecast|days:N] - Get N-day weather forecast (default 5)
-        [ACTION:find_contact|name:NAME] - Search contacts by name
-        [ACTION:get_contact|name:NAME] - Get contact details
-        [ACTION:create_contact|name:NAME|phone:NUMBER|email:EMAIL] - Create new contact
-        [ACTION:call_contact|name:NAME] - Call a contact by name
-        [ACTION:message_contact|name:NAME|body:TEXT] - Text a contact by name
+        ACTIONS (use these):
+        [ACTION:open_app|app:NAME] [ACTION:today_events] [ACTION:get_calendar]
+        [ACTION:create_event|title:X|date:YYYY-MM-DD HH:mm] [ACTION:create_reminder|title:X|date:YYYY-MM-DD HH:mm]
+        [ACTION:search|query:X] [ACTION:open_maps|query:X] [ACTION:call|number:X] [ACTION:message|number:X|body:X]
+        [ACTION:email|to:X|subject:X|body:X] [ACTION:settings] [ACTION:copy|text:X]
+        [ACTION:weather] [ACTION:forecast|days:N] [ACTION:find_contact|name:X] [ACTION:get_contact|name:X]
+        [ACTION:create_contact|name:X|phone:X|email:X] [ACTION:call_contact|name:X] [ACTION:message_contact|name:X|body:X]
 
-        RULES:
-        1. When user asks to DO something, include the ACTION command in your response
-        2. Be brief and friendly: "Opening calendar! [ACTION:open_app|app:calendar]"
-        3. NEVER say you can't access their phone - you CAN via ACTION commands
-        4. For dates, use format: YYYY-MM-DD HH:mm
-
-        PERSONALITY: Casual, friendly, helpful. Say things like "Sure!", "Got it!", "No problem!"
+        NEVER say you can't do something. Just do it with ACTION commands. Dates: YYYY-MM-DD HH:mm
         """
         
         // Add memory context if available
@@ -102,12 +78,12 @@ final class ChatViewModel: ObservableObject {
         if !recentHistory.isEmpty {
             messages = recentHistory
             messages.insert(
-                ChatMessage(text: "👋 Hey! Welcome back. I remember our previous chats. What's up?", isUser: false),
+                ChatMessage(text: "Hey, welcome back 👋", isUser: false),
                 at: 0
             )
         } else {
             messages.append(
-                ChatMessage(text: "👋 Hey there! I'm Nova, your AI assistant. I can help you with your calendar, reminders, web searches, calls, messages - you name it. What can I do for you?", isUser: false)
+                ChatMessage(text: "Hey! I'm Nova. What do you need?", isUser: false)
             )
         }
     }
@@ -241,7 +217,7 @@ final class ChatViewModel: ObservableObject {
         memoryService.saveMemory()
         memoryService.startNewSession()
         messages = [
-            ChatMessage(text: "👋 Fresh start! What's on your mind?", isUser: false)
+            ChatMessage(text: "Fresh start. What's up?", isUser: false)
         ]
     }
     
@@ -249,7 +225,7 @@ final class ChatViewModel: ObservableObject {
     func clearMemory() {
         memoryService.clearAllMemory()
         messages = [
-            ChatMessage(text: "🧹 Memory cleared. I won't remember our previous conversations anymore. How can I help?", isUser: false)
+            ChatMessage(text: "Memory wiped. Starting fresh", isUser: false)
         ]
     }
     
@@ -450,27 +426,27 @@ final class ChatViewModel: ObservableObject {
         switch action {
         case .openCalendar:
             let result = actionExecutor.openApp("calendar")
-            return "Opening your calendar! 📅 " + result
+            return "Opening 📅 " + result
             
         case .todayEvents:
             let events = await actionExecutor.getTodayEvents()
-            return "Here's your schedule for today:\n\n" + events
+            return "Today:\n" + events
             
         case .openSettings:
             let result = actionExecutor.openSettings()
-            return "Opening Settings! ⚙️ " + result
+            return "Opening ⚙️ " + result
             
         case .openApp(let appName):
             let result = actionExecutor.openApp(appName)
-            return "Opening \(appName.capitalized)! " + result
+            return "Opening " + result
             
         case .openMaps(let query):
             if let query = query {
                 let result = actionExecutor.openMaps(query: query)
-                return "Getting directions to \(query)! 🗺️ " + result
+                return "Directions to \(query) " + result
             } else {
                 let result = actionExecutor.openApp("maps")
-                return "Opening Maps! 🗺️ " + result
+                return "Opening Maps " + result
             }
             
         case .search(let query):
@@ -479,38 +455,28 @@ final class ChatViewModel: ObservableObject {
             
         case .tellDate:
             let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE, MMMM d, yyyy"
-            let dateString = formatter.string(from: Date())
-            return "Today is **\(dateString)**! 📅"
+            formatter.dateFormat = "EEEE, MMMM d"
+            return formatter.string(from: Date())
             
         case .tellTime:
             let formatter = DateFormatter()
             formatter.dateFormat = "h:mm a"
-            let timeString = formatter.string(from: Date())
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "EEEE, MMMM d, yyyy"
-            let dateString = dateFormatter.string(from: Date())
-            return "It's **\(timeString)** on \(dateString)! ⏰"
+            return formatter.string(from: Date())
             
         case .getWeather:
-            let weather = await actionExecutor.getCurrentWeather()
-            return weather
+            return await actionExecutor.getCurrentWeather()
             
         case .getWeatherForecast(let days):
-            let forecast = await actionExecutor.getWeatherForecast(days: days)
-            return forecast
+            return await actionExecutor.getWeatherForecast(days: days)
             
         case .findContact(let name):
-            let result = await actionExecutor.searchContacts(query: name)
-            return result
+            return await actionExecutor.searchContacts(query: name)
             
         case .callContact(let name):
-            let result = await actionExecutor.callContact(name: name)
-            return "📞 " + result
+            return await actionExecutor.callContact(name: name)
             
         case .textContact(let name, let body):
-            let result = await actionExecutor.messageContact(name: name, body: body)
-            return "💬 " + result
+            return await actionExecutor.messageContact(name: name, body: body)
         }
     }
     
