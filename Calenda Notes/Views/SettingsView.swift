@@ -14,6 +14,9 @@ struct SettingsView: View {
     
     @State private var showClearMemoryAlert = false
     @State private var showResetAlert = false
+    @State private var connectionStatus: Bool? = nil
+    @State private var connectionError: String? = nil
+    @State private var isTesting = false
     private let synthesizer = AVSpeechSynthesizer()
     
     private var currentVoiceName: String {
@@ -40,6 +43,71 @@ struct SettingsView: View {
         case 1.1...: return "High"
         default: return "Normal"
         }
+    }
+    
+    private func testConnection() async {
+        isTesting = true
+        connectionStatus = nil
+        connectionError = nil
+        
+        // Build URL from server URL
+        var baseURL = settings.serverURL
+        if baseURL.hasSuffix("/v1") {
+            baseURL = String(baseURL.dropLast(3))
+        }
+        if baseURL.hasSuffix("/v1/") {
+            baseURL = String(baseURL.dropLast(4))
+        }
+        
+        guard let url = URL(string: baseURL)?.appendingPathComponent("api/tags") else {
+            connectionStatus = false
+            connectionError = "Invalid URL format"
+            isTesting = false
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 10
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let http = response as? HTTPURLResponse {
+                if 200..<300 ~= http.statusCode {
+                    // Try to parse to verify it's Ollama
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let models = json["models"] as? [[String: Any]] {
+                        connectionStatus = true
+                        connectionError = nil
+                        // Also refresh models
+                        await ollamaService.fetchModels()
+                    } else {
+                        connectionStatus = false
+                        connectionError = "Response not from Ollama"
+                    }
+                } else {
+                    connectionStatus = false
+                    connectionError = "Server returned \(http.statusCode)"
+                }
+            }
+        } catch let error as URLError {
+            connectionStatus = false
+            switch error.code {
+            case .timedOut:
+                connectionError = "Connection timed out - check IP/port"
+            case .cannotConnectToHost:
+                connectionError = "Cannot connect - is Ollama running?"
+            case .networkConnectionLost:
+                connectionError = "Network connection lost"
+            default:
+                connectionError = "Network error: \(error.localizedDescription)"
+            }
+        } catch {
+            connectionStatus = false
+            connectionError = error.localizedDescription
+        }
+        
+        isTesting = false
     }
     
     private func testVoice() {
@@ -214,11 +282,31 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Server URL")
                             .font(.headline)
-                        TextField("https://...", text: $settings.serverURL)
+                        TextField("http://...", text: $settings.serverURL)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(.body, design: .monospaced))
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                        
+                        // Test connection button
+                        Button(action: {
+                            Task {
+                                await testConnection()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: connectionStatus == nil ? "network" : (connectionStatus! ? "checkmark.circle.fill" : "xmark.circle.fill"))
+                                    .foregroundColor(connectionStatus == nil ? .blue : (connectionStatus! ? .green : .red))
+                                Text(connectionStatus == nil ? "Test Connection" : (connectionStatus! ? "Connected!" : "Failed to connect"))
+                            }
+                        }
+                        .disabled(isTesting)
+                        
+                        if let error = connectionError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                     .padding(.vertical, 4)
                     
