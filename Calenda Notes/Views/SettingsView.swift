@@ -9,7 +9,7 @@ import AVFoundation
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
     @ObservedObject var viewModel: ChatViewModel
-    @StateObject private var ollamaService = OllamaService.shared
+    @ObservedObject private var ollamaService = OllamaService.shared
     @Environment(\.dismiss) private var dismiss
     
     @State private var showClearMemoryAlert = false
