@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Calenda Notes App Icon</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .icon-container {
+            margin: 20px;
+        }
+        .label {
+            color: white;
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .instructions {
+            color: #888;
+            text-align: center;
+            margin-top: 40px;
+            max-width: 500px;
+            line-height: 1.6;
+        }
+        .instructions h3 {
+            color: white;
+        }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h2 style="color: white;">Calenda Notes App Icon</h2>
+    
+    <div class="grid">
+        <!-- Design 1: Simple Waveform -->
+        <div class="icon-container">
+            <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="bgGradient1" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#2563EB"/>
+                        <stop offset="100%" style="stop-color:#7C3AED"/>
+                    </linearGradient>
+                    <clipPath id="iosClip">
+                        <rect width="1024" height="1024" rx="225" ry="225"/>
+                    </clipPath>
+                </defs>
+                
+                <!-- Background -->
+                <rect width="1024" height="1024" fill="url(#bgGradient1)" clip-path="url(#iosClip)"/>
+                
+                <!-- Outer circle glow -->
+                <circle cx="512" cy="420" r="280" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="30"/>
+                
+                <!-- Waveform bars -->
+                <g fill="white">
+                    <rect x="362" y="340" width="45" height="160" rx="22"/>
+                    <rect x="432" y="280" width="45" height="280" rx="22"/>
+                    <rect x="502" y="220" width="45" height="400" rx="22"/>
+                    <rect x="572" y="280" width="45" height="280" rx="22"/>
+                    <rect x="642" y="340" width="45" height="160" rx="22"/>
+                </g>
+                
+                <!-- Note lines at bottom -->
+                <rect x="262" y="750" width="500" height="30" rx="15" fill="rgba(255,255,255,0.7)"/>
+                <rect x="312" y="810" width="400" height="30" rx="15" fill="rgba(255,255,255,0.5)"/>
+                <rect x="362" y="870" width="300" height="30" rx="15" fill="rgba(255,255,255,0.3)"/>
+            </svg>
+            <div class="label">Design 1: Waveform with Notes (1024x1024)</div>
+        </div>
+
+        <!-- Design 2: Microphone Style -->
+        <div class="icon-container">
+            <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="bgGradient2" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#3B82F6"/>
+                        <stop offset="100%" style="stop-color:#8B5CF6"/>
+                    </linearGradient>
+                </defs>
+                
+                <!-- Background -->
+                <rect width="1024" height="1024" fill="url(#bgGradient2)" rx="225"/>
+                
+                <!-- Microphone body -->
+                <rect x="412" y="180" width="200" height="380" rx="100" fill="white"/>
+                
+                <!-- Microphone grille lines -->
+                <g stroke="rgba(59,130,246,0.3)" stroke-width="8">
+                    <line x1="450" y1="280" x2="574" y2="280"/>
+                    <line x1="450" y1="330" x2="574" y2="330"/>
+                    <line x1="450" y1="380" x2="574" y2="380"/>
+                    <line x1="450" y1="430" x2="574" y2="430"/>
+                </g>
+                
+                <!-- Microphone arc -->
+                <path d="M 312 450 Q 312 650 512 650 Q 712 650 712 450" 
+                      fill="none" stroke="white" stroke-width="40" stroke-linecap="round"/>
+                
+                <!-- Microphone stand -->
+                <rect x="492" y="650" width="40" height="120" fill="white"/>
+                <rect x="412" y="770" width="200" height="40" rx="20" fill="white"/>
+                
+                <!-- Sound waves -->
+                <path d="M 280 370 Q 230 370 230 450 Q 230 530 280 530" 
+                      fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="25" stroke-linecap="round"/>
+                <path d="M 200 320 Q 130 320 130 450 Q 130 580 200 580" 
+                      fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="25" stroke-linecap="round"/>
+                
+                <path d="M 744 370 Q 794 370 794 450 Q 794 530 744 530" 
+                      fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="25" stroke-linecap="round"/>
+                <path d="M 824 320 Q 894 320 894 450 Q 894 580 824 580" 
+                      fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="25" stroke-linecap="round"/>
+                
+                <!-- Calendar badge -->
+                <g transform="translate(700, 700)">
+                    <rect width="180" height="180" rx="40" fill="white"/>
+                    <rect x="15" y="15" width="150" height="40" rx="8" fill="#EF4444"/>
+                    <circle cx="50" cy="100" r="15" fill="#3B82F6"/>
+                    <circle cx="90" cy="100" r="15" fill="#3B82F6"/>
+                    <circle cx="130" cy="100" r="15" fill="#3B82F6"/>
+                    <circle cx="50" cy="145" r="15" fill="#3B82F6" opacity="0.5"/>
+                    <circle cx="90" cy="145" r="15" fill="#3B82F6" opacity="0.5"/>
+                </g>
+            </svg>
+            <div class="label">Design 2: Microphone with Calendar (1024x1024)</div>
+        </div>
+
+        <!-- Design 3: Modern Minimal -->
+        <div class="icon-container">
+            <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <linearGradient id="bgGradient3" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" style="stop-color:#1D4ED8"/>
+                        <stop offset="50%" style="stop-color:#6366F1"/>
+                        <stop offset="100%" style="stop-color:#9333EA"/>
+                    </linearGradient>
+                </defs>
+                
+                <!-- Background -->
+                <rect width="1024" height="1024" fill="url(#bgGradient3)" rx="225"/>
+                
+                <!-- Central waveform circle -->
+                <circle cx="512" cy="450" r="300" fill="rgba(255,255,255,0.1)"/>
+                <circle cx="512" cy="450" r="250" fill="rgba(255,255,255,0.1)"/>
+                
+                <!-- Animated-style waveform -->
+                <g fill="white">
+                    <rect x="312" y="380" width="50" height="140" rx="25"/>
+                    <rect x="387" y="320" width="50" height="260" rx="25"/>
+                    <rect x="462" y="250" width="50" height="400" rx="25"/>
+                    <rect x="537" y="320" width="50" height="260" rx="25"/>
+                    <rect x="612" y="380" width="50" height="140" rx="25"/>
+                </g>
+                
+                <!-- Document/note icon at bottom -->
+                <g transform="translate(362, 720)">
+                    <rect width="300" height="200" rx="30" fill="rgba(255,255,255,0.9)"/>
+                    <rect x="40" y="50" width="180" height="20" rx="10" fill="#6366F1" opacity="0.6"/>
+                    <rect x="40" y="90" width="140" height="20" rx="10" fill="#6366F1" opacity="0.4"/>
+                    <rect x="40" y="130" width="100" height="20" rx="10" fill="#6366F1" opacity="0.2"/>
+                    
+                    <!-- Checkmark -->
+                    <circle cx="240" cy="140" r="35" fill="#10B981"/>
+                    <path d="M 220 140 L 235 155 L 260 125" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                </g>
+            </svg>
+            <div class="label">Design 3: Modern Waveform with Notes (1024x1024)</div>
+        </div>
+    </div>
+
+    <div class="instructions">
+        <h3>How to Export</h3>
+        <p>
+            1. Right-click on your preferred icon design above<br>
+            2. Select "Save Image As..." or "Download Image"<br>
+            3. Save as PNG format<br>
+            4. The icon is already 1024x1024 pixels<br><br>
+            
+            <strong>To add to Xcode:</strong><br>
+            1. Open your project in Xcode<br>
+            2. Go to Assets.xcassets → AppIcon<br>
+            3. Drag the PNG file to the 1024x1024 slot<br>
+            4. Xcode will auto-generate other sizes
+        </p>
+    </div>
+
+    <script>
+        // Allow right-click saving of SVGs as PNG
+        document.querySelectorAll('svg').forEach(svg => {
+            svg.style.cursor = 'pointer';
+            svg.addEventListener('click', function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1024;
+                canvas.height = 1024;
+                const ctx = canvas.getContext('2d');
+                
+                const data = new XMLSerializer().serializeToString(svg);
+                const blob = new Blob([data], {type: 'image/svg+xml'});
+                const url = URL.createObjectURL(blob);
+                
+                const img = new Image();
+                img.onload = function() {
+                    ctx.drawImage(img, 0, 0, 1024, 1024);
+                    
+                    const link = document.createElement('a');
+                    link.download = 'CalendaNotesIcon.png';
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    
+                    URL.revokeObjectURL(url);
+                };
+                img.src = url;
+            });
+        });
+    </script>
+</body>
+</html>
+

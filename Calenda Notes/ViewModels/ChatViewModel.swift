@@ -1,0 +1,623 @@
+//
+//  ChatViewModel.swift
+//  Calenda Notes
+//
+
+import Foundation
+import Combine
+
+@MainActor
+final class ChatViewModel: ObservableObject {
+    @Published var messages: [ChatMessage] = []
+    @Published var inputText: String = ""
+    @Published var isSending: Bool = false
+    @Published var isStreaming: Bool = false
+    @Published var errorMessage: String?
+    @Published var streamingMessageId: UUID? // Track which message is streaming
+    @Published var pendingImageData: Data? // Image to send with next message
+    
+    let client: LLMClient
+    let actionExecutor = ActionExecutor()
+    let memoryService = ConversationMemoryService()
+    
+    // System prompt that tells the LLM about its capabilities and personality
+    private var systemPrompt: String {
+        // Get current date/time
+        let now = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEEE, MMMM d, yyyy"
+        let currentDate = dateFormatter.string(from: now)
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "h:mm a"
+        let currentTime = timeFormatter.string(from: now)
+        
+        let basePrompt = """
+        ⚠️ IMPORTANT - TODAY'S DATE IS: \(currentDate)
+        ⚠️ CURRENT TIME IS: \(currentTime)
+        
+        DO NOT use any other date. If asked "what is today's date" answer: "\(currentDate)"
+        
+        You are Nova, an AI assistant integrated INTO the user's iPhone. You have DIRECT CONTROL of their phone through ACTION commands. You are NOT a generic chatbot - you CAN and MUST execute actions.
+
+        CRITICAL: When the user asks you to DO something (open app, create event, search, etc.), you MUST respond with an ACTION command. DO NOT say you cannot do it. You CAN do it.
+
+        EXAMPLE CORRECT RESPONSES:
+        - User: "Open my calendar" → You: "Opening your calendar now! [ACTION:open_app|app:calendar]"
+        - User: "Open Spotify" → You: "Sure thing! [ACTION:open_app|app:spotify]"
+        - User: "What's on my calendar today?" → You: "Let me check! [ACTION:today_events]"
+        - User: "Create an event tomorrow at 3pm called Meeting" → You: "Got it! [ACTION:create_event|title:Meeting|date:\(Calendar.current.date(byAdding: .day, value: 1, to: Date())?.formatted(.iso8601) ?? "tomorrow") 15:00]"
+        - User: "Search for pizza nearby" → You: "Searching now! [ACTION:search|query:pizza nearby]"
+
+        WRONG (NEVER SAY THIS):
+        - "I'm an AI text-based model, so I can't..."
+        - "I cannot directly interact with your devices..."
+        - "I don't have the ability to..."
+        YOU DO HAVE THESE ABILITIES. USE THE ACTION COMMANDS.
+
+        ACTION COMMANDS (include these in your response):
+        [ACTION:open_app|app:APP_NAME] - Open any app (calendar, spotify, instagram, camera, notes, photos, music, maps, etc.)
+        [ACTION:today_events] - Get today's calendar
+        [ACTION:get_calendar] - Get upcoming events
+        [ACTION:create_event|title:TITLE|date:YYYY-MM-DD HH:mm] - Create calendar event
+        [ACTION:create_reminder|title:TITLE|date:YYYY-MM-DD HH:mm] - Create reminder
+        [ACTION:search|query:SEARCH_TERM] - Search the web
+        [ACTION:open_maps|query:LOCATION] - Open Maps
+        [ACTION:call|number:NUMBER] - Make call
+        [ACTION:message|number:NUMBER|body:TEXT] - Send SMS
+        [ACTION:email|to:EMAIL|subject:SUBJECT|body:TEXT] - Send email
+        [ACTION:settings] - Open Settings
+        [ACTION:copy|text:TEXT] - Copy to clipboard
+        [ACTION:weather] - Get current weather at user's location
+        [ACTION:forecast|days:N] - Get N-day weather forecast (default 5)
+        [ACTION:find_contact|name:NAME] - Search contacts by name
+        [ACTION:get_contact|name:NAME] - Get contact details
+        [ACTION:create_contact|name:NAME|phone:NUMBER|email:EMAIL] - Create new contact
+        [ACTION:call_contact|name:NAME] - Call a contact by name
+        [ACTION:message_contact|name:NAME|body:TEXT] - Text a contact by name
+
+        RULES:
+        1. When user asks to DO something, include the ACTION command in your response
+        2. Be brief and friendly: "Opening calendar! [ACTION:open_app|app:calendar]"
+        3. NEVER say you can't access their phone - you CAN via ACTION commands
+        4. For dates, use format: YYYY-MM-DD HH:mm
+
+        PERSONALITY: Casual, friendly, helpful. Say things like "Sure!", "Got it!", "No problem!"
+        """
+        
+        // Add memory context if available
+        let topicsSummary = memoryService.getRecentTopicsSummary()
+        if !topicsSummary.isEmpty {
+            return basePrompt + "\n\n" + topicsSummary
+        }
+        
+        return basePrompt
+    }
+    
+    init(client: LLMClient) {
+        self.client = client
+        
+        // Load recent conversation history from memory
+        let recentHistory = memoryService.getRecentHistory(maxMessages: 10)
+        if !recentHistory.isEmpty {
+            messages = recentHistory
+            messages.insert(
+                ChatMessage(text: "👋 Hey! Welcome back. I remember our previous chats. What's up?", isUser: false),
+                at: 0
+            )
+        } else {
+            messages.append(
+                ChatMessage(text: "👋 Hey there! I'm Nova, your AI assistant. I can help you with your calendar, reminders, web searches, calls, messages - you name it. What can I do for you?", isUser: false)
+            )
+        }
+    }
+    
+    func send() {
+        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || pendingImageData != nil, !isSending else { return }
+        
+        // Capture the image data before clearing
+        let imageToSend = pendingImageData
+        let messageText = trimmed.isEmpty && imageToSend != nil ? "Please analyze this image." : trimmed
+        
+        // Create user message with optional image
+        let userMessage = ChatMessage(text: messageText, isUser: true, imageData: imageToSend)
+        messages.append(userMessage)
+        memoryService.addMessage(userMessage) // Save to memory
+        inputText = ""
+        pendingImageData = nil // Clear pending image
+        errorMessage = nil
+        isSending = true
+        
+        // Skip quick actions if there's an image (needs LLM vision)
+        if imageToSend == nil, let quickAction = detectQuickAction(messageText) {
+            Task {
+                let result = await executeQuickAction(quickAction, userInput: messageText)
+                let reply = ChatMessage(text: result, isUser: false)
+                messages.append(reply)
+                memoryService.addMessage(reply)
+                isSending = false
+            }
+            return
+        }
+        
+        Task {
+            do {
+                // Build messages with system prompt and memory context
+                var historyForLLM = messages.map { msg in
+                    ChatMessage(text: msg.text, isUser: msg.isUser, imageData: msg.imageData)
+                }
+                
+                // Add system prompt as first message context
+                var visionPrompt = systemPrompt
+                if imageToSend != nil {
+                    visionPrompt += """
+                    
+                    
+                    VISION CAPABILITY: You have vision and can analyze images. When the user shares an image:
+                    1. Describe what you see clearly and accurately
+                    2. Answer any questions about the image
+                    3. Provide helpful insights based on the visual content
+                    4. If it's a photo of text/document, read and summarize it
+                    5. If it's a photo of a person/place/object, describe it helpfully
+                    """
+                }
+                let contextMessage = ChatMessage(text: visionPrompt, isUser: false)
+                historyForLLM.insert(contextMessage, at: 0)
+                
+                // Add relevant memory context if user's message might benefit from past context
+                let memoryContext = memoryService.getRelevantContext(for: messageText, maxEntries: 5)
+                if !memoryContext.isEmpty {
+                    let memoryMessage = ChatMessage(text: memoryContext, isUser: false)
+                    historyForLLM.insert(memoryMessage, at: 1)
+                }
+                
+                // Create a placeholder message for streaming
+                let streamingMessage = ChatMessage(text: "", isUser: false)
+                let streamingId = streamingMessage.id
+                messages.append(streamingMessage)
+                streamingMessageId = streamingId
+                isStreaming = true
+                
+                // Use streaming if available
+                var fullResponse = ""
+                
+                do {
+                    fullResponse = try await client.streamMessage(
+                        history: historyForLLM,
+                        userInput: messageText,
+                        imageData: imageToSend
+                    ) { [weak self] chunk in
+                        guard let self = self else { return }
+                        // Update the streaming message with new content
+                        if let index = self.messages.firstIndex(where: { $0.id == streamingId }) {
+                            let currentText = self.messages[index].text
+                            self.messages[index] = ChatMessage(
+                                id: streamingId,
+                                text: currentText + chunk,
+                                isUser: false,
+                                timestamp: self.messages[index].timestamp
+                            )
+                        }
+                    }
+                } catch {
+                    // Fallback to non-streaming if streaming fails
+                    print("⚠️ Streaming failed, falling back to non-streaming: \(error)")
+                    fullResponse = try await client.sendMessage(
+                        history: historyForLLM,
+                        userInput: messageText,
+                        imageData: imageToSend
+                    )
+                }
+                
+                isStreaming = false
+                streamingMessageId = nil
+                
+                // Process any actions in the response
+                let processedReply = await processActions(in: fullResponse)
+                
+                // Update the final message with processed content
+                if let index = messages.firstIndex(where: { $0.id == streamingId }) {
+                    messages[index] = ChatMessage(
+                        id: streamingId,
+                        text: processedReply,
+                        isUser: false,
+                        timestamp: messages[index].timestamp
+                    )
+                    memoryService.addMessage(messages[index]) // Save to memory
+                }
+                
+            } catch {
+                errorMessage = error.localizedDescription
+                isStreaming = false
+                streamingMessageId = nil
+            }
+            isSending = false
+        }
+    }
+    
+    /// Start a new conversation session
+    func newConversation() {
+        memoryService.saveMemory()
+        memoryService.startNewSession()
+        messages = [
+            ChatMessage(text: "👋 Fresh start! What's on your mind?", isUser: false)
+        ]
+    }
+    
+    /// Clear all memory
+    func clearMemory() {
+        memoryService.clearAllMemory()
+        messages = [
+            ChatMessage(text: "🧹 Memory cleared. I won't remember our previous conversations anymore. How can I help?", isUser: false)
+        ]
+    }
+    
+    /// Process ACTION commands in the LLM response
+    private func processActions(in text: String) async -> String {
+        var result = text
+        
+        // Find all [ACTION:...] patterns
+        let pattern = #"\[ACTION:([^\]]+)\]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return text
+        }
+        
+        let matches = regex.matches(in: text, options: [], range: NSRange(text.startIndex..., in: text))
+        
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: text),
+                  let actionRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+            
+            let actionString = String(text[actionRange])
+            let actionResult = await executeAction(actionString)
+            
+            // Replace the action tag with the result
+            result = result.replacingCharacters(in: range, with: actionResult)
+        }
+        
+        return result
+    }
+    
+    /// Execute a single action string like "create_event|title:Meeting|date:2024-01-15 14:00"
+    private func executeAction(_ actionString: String) async -> String {
+        let parts = actionString.components(separatedBy: "|")
+        guard let action = parts.first else {
+            return "❌ Invalid action"
+        }
+        
+        var parameters: [String: Any] = [:]
+        
+        for part in parts.dropFirst() {
+            let keyValue = part.components(separatedBy: ":")
+            if keyValue.count >= 2 {
+                let key = keyValue[0].trimmingCharacters(in: .whitespaces)
+                let value = keyValue.dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
+                
+                // Try to parse dates
+                if key == "date" {
+                    if let date = parseDate(value) {
+                        parameters[key] = date
+                    } else {
+                        parameters[key] = value
+                    }
+                } else {
+                    parameters[key] = value
+                }
+            }
+        }
+        
+        return await actionExecutor.parseAndExecute(action: action, parameters: parameters)
+    }
+    
+    // MARK: - Quick Action Detection (Fallback)
+    
+    enum QuickAction {
+        case openApp(String)
+        case openCalendar
+        case todayEvents
+        case openSettings
+        case openMaps(String?)
+        case search(String)
+        case tellDate
+        case tellTime
+        case getWeather
+        case getWeatherForecast(Int)
+        case findContact(String)
+        case callContact(String)
+        case textContact(String, String)
+    }
+    
+    private func detectQuickAction(_ input: String) -> QuickAction? {
+        let lowercased = input.lowercased()
+        
+        // Open calendar
+        if lowercased.contains("open") && (lowercased.contains("calendar") || lowercased.contains("calender")) {
+            return .openCalendar
+        }
+        
+        // Today's events
+        if (lowercased.contains("what") || lowercased.contains("show") || lowercased.contains("check")) &&
+           (lowercased.contains("calendar") || lowercased.contains("schedule") || lowercased.contains("events")) &&
+           lowercased.contains("today") {
+            return .todayEvents
+        }
+        
+        // Open settings
+        if lowercased.contains("open") && lowercased.contains("settings") {
+            return .openSettings
+        }
+        
+        // Open specific apps
+        let appPatterns = [
+            ("spotify", "spotify"), ("instagram", "instagram"), ("twitter", "twitter"),
+            ("youtube", "youtube"), ("whatsapp", "whatsapp"), ("camera", "camera"),
+            ("photos", "photos"), ("music", "music"), ("notes", "notes"),
+            ("reminders", "reminders"), ("maps", "maps"), ("safari", "safari"),
+            ("messages", "messages"), ("phone", "phone"), ("mail", "mail"),
+            ("weather", "weather"), ("clock", "clock"), ("calculator", "calculator"),
+            ("tiktok", "tiktok"), ("snapchat", "snapchat"), ("facebook", "facebook"),
+            ("netflix", "netflix"), ("slack", "slack"), ("zoom", "zoom"),
+            ("discord", "discord"), ("telegram", "telegram")
+        ]
+        
+        if lowercased.contains("open") || lowercased.contains("launch") {
+            for (keyword, appName) in appPatterns {
+                if lowercased.contains(keyword) {
+                    return .openApp(appName)
+                }
+            }
+        }
+        
+        // Maps with query
+        if lowercased.contains("directions") || (lowercased.contains("navigate") || lowercased.contains("take me")) {
+            let query = input.replacingOccurrences(of: "(?i)(get directions to|navigate to|take me to|directions to)", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            return .openMaps(query.isEmpty ? nil : query)
+        }
+        
+        // Date questions
+        if (lowercased.contains("what") || lowercased.contains("tell")) && 
+           (lowercased.contains("date") || lowercased.contains("day is it") || lowercased.contains("today")) &&
+           !lowercased.contains("calendar") && !lowercased.contains("event") {
+            return .tellDate
+        }
+        
+        // Time questions
+        if (lowercased.contains("what") || lowercased.contains("tell")) && 
+           lowercased.contains("time") && !lowercased.contains("event") {
+            return .tellTime
+        }
+        
+        // Weather questions
+        if lowercased.contains("weather") || 
+           (lowercased.contains("temperature") && !lowercased.contains("set")) ||
+           lowercased.contains("how cold") || lowercased.contains("how hot") ||
+           lowercased.contains("is it raining") || lowercased.contains("is it sunny") {
+            if lowercased.contains("forecast") || lowercased.contains("week") || lowercased.contains("next") {
+                // Extract days if mentioned
+                if let match = lowercased.range(of: #"(\d+)\s*day"#, options: .regularExpression),
+                   let days = Int(String(lowercased[match]).filter { $0.isNumber }) {
+                    return .getWeatherForecast(days)
+                }
+                return .getWeatherForecast(5)
+            }
+            return .getWeather
+        }
+        
+        // Contact lookup - "find contact", "look up contact", "search contacts"
+        if (lowercased.contains("find") || lowercased.contains("look up") || lowercased.contains("search")) &&
+           lowercased.contains("contact") {
+            // Try to extract name
+            let patterns = ["find contact", "look up contact", "search contact", "find", "look up", "search"]
+            var name = input
+            for pattern in patterns {
+                name = name.replacingOccurrences(of: pattern, with: "", options: .caseInsensitive)
+            }
+            name = name.replacingOccurrences(of: "contact", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return .findContact(name)
+            }
+        }
+        
+        // Call contact by name - "call mom", "call John"
+        if lowercased.hasPrefix("call ") && !lowercased.contains("phone") {
+            let name = String(input.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty && !name.contains(where: { $0.isNumber }) {
+                return .callContact(name)
+            }
+        }
+        
+        // Text contact by name - "text mom", "message John"
+        if (lowercased.hasPrefix("text ") || lowercased.hasPrefix("message ")) && 
+           !lowercased.contains("phone") && !lowercased.contains("number") {
+            let prefix = lowercased.hasPrefix("text ") ? 5 : 8
+            let rest = String(input.dropFirst(prefix)).trimmingCharacters(in: .whitespacesAndNewlines)
+            // Check if there's a message included (e.g., "text mom I'll be late")
+            let parts = rest.split(separator: " ", maxSplits: 1)
+            if let name = parts.first, !name.isEmpty && !String(name).contains(where: { $0.isNumber }) {
+                let body = parts.count > 1 ? String(parts[1]) : ""
+                return .textContact(String(name), body)
+            }
+        }
+        
+        return nil
+    }
+    
+    private func executeQuickAction(_ action: QuickAction, userInput: String) async -> String {
+        switch action {
+        case .openCalendar:
+            let result = actionExecutor.openApp("calendar")
+            return "Opening your calendar! 📅 " + result
+            
+        case .todayEvents:
+            let events = await actionExecutor.getTodayEvents()
+            return "Here's your schedule for today:\n\n" + events
+            
+        case .openSettings:
+            let result = actionExecutor.openSettings()
+            return "Opening Settings! ⚙️ " + result
+            
+        case .openApp(let appName):
+            let result = actionExecutor.openApp(appName)
+            return "Opening \(appName.capitalized)! " + result
+            
+        case .openMaps(let query):
+            if let query = query {
+                let result = actionExecutor.openMaps(query: query)
+                return "Getting directions to \(query)! 🗺️ " + result
+            } else {
+                let result = actionExecutor.openApp("maps")
+                return "Opening Maps! 🗺️ " + result
+            }
+            
+        case .search(let query):
+            let result = await actionExecutor.searchWeb(query: query)
+            return result
+            
+        case .tellDate:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, MMMM d, yyyy"
+            let dateString = formatter.string(from: Date())
+            return "Today is **\(dateString)**! 📅"
+            
+        case .tellTime:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "h:mm a"
+            let timeString = formatter.string(from: Date())
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "EEEE, MMMM d, yyyy"
+            let dateString = dateFormatter.string(from: Date())
+            return "It's **\(timeString)** on \(dateString)! ⏰"
+            
+        case .getWeather:
+            let weather = await actionExecutor.getCurrentWeather()
+            return weather
+            
+        case .getWeatherForecast(let days):
+            let forecast = await actionExecutor.getWeatherForecast(days: days)
+            return forecast
+            
+        case .findContact(let name):
+            let result = await actionExecutor.searchContacts(query: name)
+            return result
+            
+        case .callContact(let name):
+            let result = await actionExecutor.callContact(name: name)
+            return "📞 " + result
+            
+        case .textContact(let name, let body):
+            let result = await actionExecutor.messageContact(name: name, body: body)
+            return "💬 " + result
+        }
+    }
+    
+    /// Parse date string in various formats
+    private func parseDate(_ string: String) -> Date? {
+        let calendar = Calendar.current
+        let now = Date()
+        let lowercased = string.lowercased()
+        
+        // Helper to extract time from string
+        func extractTime(from str: String, defaultHour: Int = 9) -> (hour: Int, minute: Int) {
+            // Try HH:mm format
+            if let match = str.range(of: #"\d{1,2}:\d{2}"#, options: .regularExpression) {
+                let timeStr = String(str[match])
+                let parts = timeStr.split(separator: ":")
+                if parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) {
+                    var hour = h
+                    // Handle PM
+                    if str.lowercased().contains("pm") && hour < 12 { hour += 12 }
+                    if str.lowercased().contains("am") && hour == 12 { hour = 0 }
+                    return (hour, m)
+                }
+            }
+            // Try "3pm", "3 pm", "15:00" patterns
+            if let match = str.range(of: #"(\d{1,2})\s*(am|pm)"#, options: [.regularExpression, .caseInsensitive]) {
+                let timeStr = String(str[match])
+                if let hourMatch = timeStr.range(of: #"\d{1,2}"#, options: .regularExpression) {
+                    var hour = Int(String(timeStr[hourMatch])) ?? defaultHour
+                    if timeStr.lowercased().contains("pm") && hour < 12 { hour += 12 }
+                    if timeStr.lowercased().contains("am") && hour == 12 { hour = 0 }
+                    return (hour, 0)
+                }
+            }
+            return (defaultHour, 0)
+        }
+        
+        // Try standard formats first
+        let formats = [
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd'T'HH:mm",
+            "yyyy-MM-dd",
+            "MM/dd/yyyy HH:mm",
+            "MM/dd/yyyy",
+            "MMMM d, yyyy HH:mm",
+            "MMMM d, yyyy",
+            "MMM d, yyyy HH:mm",
+            "MMM d, yyyy"
+        ]
+        
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.dateFormat = format
+            formatter.locale = Locale(identifier: "en_US")
+            if let date = formatter.date(from: string) {
+                return date
+            }
+        }
+        
+        // Handle relative dates
+        var targetDate = now
+        let time = extractTime(from: string)
+        
+        if lowercased.contains("today") {
+            targetDate = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: now) ?? now
+            return targetDate
+        }
+        
+        if lowercased.contains("tomorrow") {
+            targetDate = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+            targetDate = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: targetDate) ?? targetDate
+            return targetDate
+        }
+        
+        if lowercased.contains("next week") {
+            targetDate = calendar.date(byAdding: .weekOfYear, value: 1, to: now) ?? now
+            targetDate = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: targetDate) ?? targetDate
+            return targetDate
+        }
+        
+        // Handle day names (monday, tuesday, etc.)
+        let dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+        for (index, dayName) in dayNames.enumerated() {
+            if lowercased.contains(dayName) {
+                let todayWeekday = calendar.component(.weekday, from: now)
+                var daysToAdd = index + 1 - todayWeekday
+                if daysToAdd <= 0 { daysToAdd += 7 } // Next occurrence
+                targetDate = calendar.date(byAdding: .day, value: daysToAdd, to: now) ?? now
+                targetDate = calendar.date(bySettingHour: time.hour, minute: time.minute, second: 0, of: targetDate) ?? targetDate
+                return targetDate
+            }
+        }
+        
+        // Handle "in X hours/days"
+        if let match = lowercased.range(of: #"in (\d+) (hour|day|minute)"#, options: .regularExpression) {
+            let matchStr = String(lowercased[match])
+            if let numMatch = matchStr.range(of: #"\d+"#, options: .regularExpression) {
+                let num = Int(String(matchStr[numMatch])) ?? 1
+                if matchStr.contains("hour") {
+                    return calendar.date(byAdding: .hour, value: num, to: now)
+                } else if matchStr.contains("day") {
+                    return calendar.date(byAdding: .day, value: num, to: now)
+                } else if matchStr.contains("minute") {
+                    return calendar.date(byAdding: .minute, value: num, to: now)
+                }
+            }
+        }
+        
+        return nil
+    }
+}

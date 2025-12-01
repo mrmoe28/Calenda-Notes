@@ -1,0 +1,65 @@
+================================================================================
+INFO.PLIST KEYS - QUICK REFERENCE
+================================================================================
+
+Add these three keys to your Info.plist file in Xcode:
+
+--------------------------------------------------------------------------------
+1. MICROPHONE PERMISSION
+--------------------------------------------------------------------------------
+Key: NSMicrophoneUsageDescription
+Type: String
+Value: This app uses the microphone to capture your voice notes.
+
+Purpose: Required for AVAudioEngine to access the device microphone for 
+         recording voice notes.
+
+--------------------------------------------------------------------------------
+2. SPEECH RECOGNITION PERMISSION
+--------------------------------------------------------------------------------
+Key: NSSpeechRecognitionUsageDescription
+Type: String
+Value: This app uses speech recognition to convert your voice notes into text.
+
+Purpose: Required for SFSpeechRecognizer to perform speech-to-text conversion.
+
+--------------------------------------------------------------------------------
+3. CALENDAR PERMISSION
+--------------------------------------------------------------------------------
+Key: NSCalendarsUsageDescription
+Type: String
+Value: This app uses Calendar access to save your notes as events.
+
+Purpose: Required for EventKit (EKEventStore) to create and save calendar events.
+
+================================================================================
+HOW TO ADD IN XCODE:
+================================================================================
+
+1. Select your project in the Project Navigator
+2. Select your app target
+3. Go to the "Info" tab
+4. Click the "+" button next to any existing key
+5. Type the key name (e.g., "Privacy - Microphone Usage Description")
+   OR use the raw key name (e.g., "NSMicrophoneUsageDescription")
+6. Set Type to "String"
+7. Enter the value in the Value column
+8. Repeat for all three keys
+
+================================================================================
+ALTERNATIVE: EDIT INFO.PLIST DIRECTLY
+================================================================================
+
+If you prefer to edit the Info.plist file directly, add these entries:
+
+<key>NSMicrophoneUsageDescription</key>
+<string>This app uses the microphone to capture your voice notes.</string>
+
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>This app uses speech recognition to convert your voice notes into text.</string>
+
+<key>NSCalendarsUsageDescription</key>
+<string>This app uses Calendar access to save your notes as events.</string>
+
+================================================================================
+
