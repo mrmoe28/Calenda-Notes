@@ -118,6 +118,13 @@ final class LocalLLMClient: LLMClient {
         self.endpointPath = endpointPath
     }
     
+    /// Convenience init that reads URL from AppSettings
+    init() {
+        let serverURL = AppSettings.shared.serverURL
+        self.baseURL = URL(string: serverURL) ?? URL(string: "http://localhost:1234")!
+        self.endpointPath = "/v1/chat/completions"
+    }
+    
     // MARK: - Build Request
     
     private func buildRequest(history: [ChatMessage], userInput: String, imageData: Data?, stream: Bool) async throws -> URLRequest {
