@@ -19,6 +19,7 @@ final class ChatViewModel: ObservableObject {
     let client: LLMClient
     let actionExecutor = ActionExecutor()
     let memoryService = ConversationMemoryService()
+    let trainingService = TrainingService.shared
     
     // System prompt that tells the LLM about its capabilities and personality
     private var systemPrompt: String {
@@ -104,6 +105,27 @@ final class ChatViewModel: ObservableObject {
         pendingImageData = nil // Clear pending image
         errorMessage = nil
         isSending = true
+        
+        // Check trained responses first (custom personality)
+        if imageToSend == nil, let trained = trainingService.findMatch(for: messageText) {
+            Task {
+                var response = trained.response
+                
+                // Execute action if present
+                if let action = trained.action {
+                    let actionResult = await executeAction(action)
+                    if !actionResult.isEmpty && !actionResult.contains("❌") {
+                        response += " " + actionResult
+                    }
+                }
+                
+                let reply = ChatMessage(text: response, isUser: false)
+                messages.append(reply)
+                memoryService.addMessage(reply)
+                isSending = false
+            }
+            return
+        }
         
         // Skip quick actions if there's an image (needs LLM vision)
         if imageToSend == nil, let quickAction = detectQuickAction(messageText) {
