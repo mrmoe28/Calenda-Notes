@@ -69,7 +69,7 @@ final class AppSettings: ObservableObject {
         self.temperature = UserDefaults.standard.object(forKey: "llm_temperature") as? Double ?? 0.7
         self.maxTokens = UserDefaults.standard.object(forKey: "llm_max_tokens") as? Int ?? 2048
         self.modelName = UserDefaults.standard.string(forKey: "llm_model_name") ?? "qwen2.5:1.5b"
-        self.serverURL = UserDefaults.standard.string(forKey: "llm_server_url") ?? "http://localhost:11434/v1"
+        self.serverURL = UserDefaults.standard.string(forKey: "llm_server_url") ?? "http://10.0.0.17:11434/v1"
         
         self.voiceSpeed = UserDefaults.standard.object(forKey: "voice_speed") as? Double ?? 0.5
         self.voiceIdentifier = UserDefaults.standard.string(forKey: "voice_identifier") ?? ""
@@ -87,7 +87,7 @@ final class AppSettings: ObservableObject {
         temperature = 0.7
         maxTokens = 2048
         modelName = "qwen2.5:1.5b"
-        serverURL = "http://localhost:11434/v1"
+        serverURL = "http://10.0.0.17:11434/v1"
         voiceSpeed = 0.5
         voiceIdentifier = ""
         voicePitch = 1.0
