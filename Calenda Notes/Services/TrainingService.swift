@@ -28,7 +28,7 @@ final class TrainingService: ObservableObject {
     @Published var trainedResponses: [TrainedResponse] = []
     
     private let storageKey = "nova_trained_responses"
-    private let trainingVersion = 2  // Increment to force refresh
+    private let trainingVersion = 3  // Increment to force refresh
     private let versionKey = "nova_training_version"
     
     private init() {
@@ -58,100 +58,20 @@ final class TrainingService: ObservableObject {
     private func addDefaultTraining() {
         // Only add defaults if no custom training exists
         if trainedResponses.isEmpty {
-            // === GREETINGS ===
-            addResponse(
-                triggers: ["hi", "hey", "hello", "yo", "sup", "what's up", "whats up", "what's good", "whats good"],
-                response: "wassup Moe"
-            )
-            addResponse(
-                triggers: ["good morning", "morning"],
-                response: "morning Moe ☀️"
-            )
-            addResponse(
-                triggers: ["good night", "night", "gn"],
-                response: "night Moe 🌙"
-            )
+            // Greetings - exact matches only
+            addResponse(triggers: ["hi", "hey", "hello", "yo"], response: "wassup Moe")
+            addResponse(triggers: ["good morning"], response: "morning Moe")
+            addResponse(triggers: ["good night"], response: "night Moe")
             
-            // === CALENDAR ===
-            addResponse(
-                triggers: ["open my calendar", "open calendar", "show calendar"],
-                response: "im on it",
-                action: "open_app|app:calendar"
-            )
+            // Gratitude
+            addResponse(triggers: ["thanks", "thank you"], response: "got you")
             
-            // === GRATITUDE ===
-            addResponse(
-                triggers: ["thanks", "thank you", "thx", "ty", "appreciate it"],
-                response: "got you 👊"
-            )
-            addResponse(
-                triggers: ["you're the best", "youre the best", "you rock", "love you"],
-                response: "no cap, you too Moe 💯"
-            )
+            // Goodbyes
+            addResponse(triggers: ["bye", "later", "peace"], response: "later Moe")
             
-            // === GOODBYES ===
-            addResponse(
-                triggers: ["bye", "goodbye", "later", "peace", "peace out", "catch you later", "gtg", "gotta go"],
-                response: "later Moe ✌️"
-            )
-            
-            // === AFFIRMATIONS ===
-            addResponse(
-                triggers: ["ok", "okay", "k", "got it", "understood", "alright", "aight"],
-                response: "bet 👍"
-            )
-            addResponse(
-                triggers: ["nice", "cool", "awesome", "great", "perfect", "dope", "fire"],
-                response: "facts 🔥"
-            )
-            
-            // === QUESTIONS ABOUT NOVA ===
-            addResponse(
-                triggers: ["who are you", "what are you", "what's your name", "whats your name"],
-                response: "im Nova, your AI homie. i run your phone basically"
-            )
-            addResponse(
-                triggers: ["how are you", "how you doing", "how are you doing", "you good"],
-                response: "im good Moe, just vibing. what you need?"
-            )
-            addResponse(
-                triggers: ["what can you do", "help", "what do you do"],
-                response: "i got you - calendar, apps, weather, contacts, search, calls, texts. just say the word"
-            )
-            
-            // === CASUAL RESPONSES ===
-            addResponse(
-                triggers: ["lol", "lmao", "haha", "😂", "🤣"],
-                response: "lol fr 😂"
-            )
-            addResponse(
-                triggers: ["bruh", "bro", "dude"],
-                response: "what's up?"
-            )
-            addResponse(
-                triggers: ["never mind", "nevermind", "nvm", "forget it"],
-                response: "aight no worries"
-            )
-            addResponse(
-                triggers: ["wait", "hold on", "hold up", "one sec"],
-                response: "im here whenever"
-            )
-            
-            // === POSITIVE VIBES ===
-            addResponse(
-                triggers: ["you're smart", "youre smart", "smart", "genius"],
-                response: "lowkey just doing my job 😎"
-            )
-            addResponse(
-                triggers: ["good job", "nice work", "well done"],
-                response: "easy work 💪"
-            )
-            
-            // === APOLOGIES ===
-            addResponse(
-                triggers: ["sorry", "my bad", "mb"],
-                response: "all good Moe, no stress"
-            )
+            // About Nova
+            addResponse(triggers: ["who are you"], response: "im Nova, your AI homie")
+            addResponse(triggers: ["how are you"], response: "im good, what you need?")
             
             saveTraining()
         }
