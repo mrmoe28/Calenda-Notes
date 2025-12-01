@@ -6,6 +6,7 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct ChatView: View {
     @ObservedObject var viewModel: ChatViewModel
@@ -17,6 +18,10 @@ struct ChatView: View {
     @State private var showDocumentPicker = false
     @State private var showCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var lastSpokenMessageId: UUID?
+    
+    // Speech synthesizer for reading responses aloud
+    private let synthesizer = AVSpeechSynthesizer()
     
     var body: some View {
         VStack(spacing: 0) {
@@ -259,6 +264,83 @@ struct ChatView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(viewModel: viewModel)
         }
+        // Speak Nova's responses when streaming finishes
+        .onChange(of: viewModel.isStreaming) { wasStreaming, isStreaming in
+            handleStreamingChange(wasStreaming: wasStreaming, isStreaming: isStreaming)
+        }
+    }
+    
+    // MARK: - Streaming Change Handler
+    
+    private func handleStreamingChange(wasStreaming: Bool, isStreaming: Bool) {
+        // When streaming ends (was true, now false), speak the response
+        guard wasStreaming && !isStreaming else { return }
+        guard settings.speakResponsesInChat else { return }
+        guard let lastMessage = viewModel.messages.last else { return }
+        guard !lastMessage.isUser else { return }
+        guard lastMessage.id != lastSpokenMessageId else { return }
+        
+        speakText(lastMessage.text)
+        lastSpokenMessageId = lastMessage.id
+    }
+    
+    // MARK: - Text to Speech
+    
+    private func speakText(_ text: String) {
+        // Stop any ongoing speech
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        
+        // Clean text for speech (remove markdown, emojis, etc.)
+        let cleanedText = cleanTextForSpeech(text)
+        guard !cleanedText.isEmpty else { return }
+        
+        // Configure audio session
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setActive(true)
+        } catch {
+            print("❌ Audio session error: \(error)")
+        }
+        
+        let utterance = AVSpeechUtterance(string: cleanedText)
+        utterance.rate = settings.voiceSpeed > 0 ? Float(settings.voiceSpeed) : 0.5
+        utterance.pitchMultiplier = settings.voicePitch > 0 ? Float(settings.voicePitch) : 1.0
+        utterance.volume = 1.0
+        
+        // Use saved voice
+        if !settings.voiceIdentifier.isEmpty,
+           let voice = AVSpeechSynthesisVoice(identifier: settings.voiceIdentifier) {
+            utterance.voice = voice
+        } else {
+            // Default to a good English voice
+            let voices = AVSpeechSynthesisVoice.speechVoices()
+            let englishVoices = voices.filter { $0.language.starts(with: "en") }
+            let premiumVoice = englishVoices.first { $0.quality == .enhanced }
+            utterance.voice = premiumVoice ?? AVSpeechSynthesisVoice(language: "en-US")
+        }
+        
+        synthesizer.speak(utterance)
+    }
+    
+    private func cleanTextForSpeech(_ text: String) -> String {
+        var cleaned = text
+        // Remove markdown
+        cleaned = cleaned.replacingOccurrences(of: "**", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "*", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "#", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "`", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "[", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "]", with: "")
+        // Remove URLs
+        cleaned = cleaned.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
+        // Remove emojis for cleaner speech (keep some basic ones)
+        cleaned = cleaned.replacingOccurrences(of: #"[\u{1F600}-\u{1F64F}]"#, with: "", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"[\u{1F300}-\u{1F5FF}]"#, with: "", options: .regularExpression)
+        cleaned = cleaned.replacingOccurrences(of: #"[\u{1F680}-\u{1F6FF}]"#, with: "", options: .regularExpression)
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     private func scrollToBottom(proxy: ScrollViewProxy) {

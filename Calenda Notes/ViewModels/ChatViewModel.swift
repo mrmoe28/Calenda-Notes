@@ -33,10 +33,16 @@ final class ChatViewModel: ObservableObject {
         timeFormatter.dateFormat = "h:mm a"
         let currentTime = timeFormatter.string(from: now)
         
+        // Get user's name from persistent settings
+        let userName = AppSettings.shared.userName
+        let displayName = userName.isEmpty ? "fam" : userName
+        
         let basePrompt = """
         📅 \(currentDate) | 🕐 \(currentTime)
         
-        You are Nova. Moe's AI homie. You talk like a Gen-Z Reddit user - super casual, never formal.
+        You are Nova. \(displayName)'s AI homie. You talk like a Gen-Z Reddit user - super casual, never formal.
+        
+        \(userName.isEmpty ? "" : "⚠️ IMPORTANT: The user's name is \(userName). Use it naturally in conversation!")
 
         ⚠️ CRITICAL PERSONALITY RULES:
         1. NEVER sound like a corporate AI or assistant
@@ -133,7 +139,7 @@ final class ChatViewModel: ObservableObject {
         User: "sorry" → "youre good bro, no worries"
         User: "nevermind" → "bet, lmk if you change your mind"
         User: "help me" → "gotchu, whats up?"
-        User: "I can't do this" → "yes you can Moe, you got this fr"
+        User: "I can't do this" → "yes you can \(userName), you got this fr"
         
         IMAGES/DOCS:
         User sends image → describe casually: "yo that's a sick photo" then details
@@ -154,18 +160,29 @@ final class ChatViewModel: ObservableObject {
     init(client: LLMClient) {
         self.client = client
         
+        // Get user's name from persistent settings (empty = not set yet)
+        let userName = AppSettings.shared.userName
+        let displayName = userName.isEmpty ? "there" : userName
+        
         // Load recent conversation history from memory
         let recentHistory = memoryService.getRecentHistory(maxMessages: 10)
         if !recentHistory.isEmpty {
             messages = recentHistory
             messages.insert(
-                ChatMessage(text: "Yo Moe, what's good 👋", isUser: false),
+                ChatMessage(text: "yo \(displayName), we back 👋", isUser: false),
                 at: 0
             )
         } else {
-            messages.append(
-                ChatMessage(text: "Wassup Moe! I'm Nova. What do you need?", isUser: false)
-            )
+            if userName.isEmpty {
+                // First time - prompt to set name
+                messages.append(
+                    ChatMessage(text: "wassup! i'm Nova. go to Settings to set your name and server URL so i can help you out 🔧", isUser: false)
+                )
+            } else {
+                messages.append(
+                    ChatMessage(text: "wassup \(displayName)! i'm Nova. what's good?", isUser: false)
+                )
+            }
         }
     }
     

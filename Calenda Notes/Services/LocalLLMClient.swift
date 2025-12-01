@@ -106,26 +106,86 @@ extension LLMClient {
 }
 
 final class LocalLLMClient: LLMClient {
-    private let baseURL: URL
-    private let endpointPath: String
+    private let maxRetries = 3
     
+    init() {
+        print("🔧 LocalLLMClient initialized (dynamic URL from settings)")
+    }
+    
+    // Legacy init for compatibility - URL is ignored, reads from settings
     init(baseURL: URL, endpointPath: String, urlSession: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.endpointPath = endpointPath
+        print("🔧 LocalLLMClient initialized (will read URL from settings)")
+    }
+    
+    // MARK: - Dynamic URL from Settings
+    
+    private func getServerURL() async -> URL {
+        let serverURL = await MainActor.run {
+            AppSettings.shared.serverURL
+        }
+        
+        // Parse and clean the URL
+        var urlString = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove trailing slashes
+        while urlString.hasSuffix("/") {
+            urlString = String(urlString.dropLast())
+        }
+        
+        // Ensure we have the full chat completions endpoint
+        if !urlString.contains("/chat/completions") {
+            if urlString.hasSuffix("/v1") {
+                urlString += "/chat/completions"
+            } else {
+                urlString += "/v1/chat/completions"
+            }
+        }
+        
+        return URL(string: urlString) ?? URL(string: "http://localhost:11434/v1/chat/completions")!
+    }
+    
+    // MARK: - Retry Logic
+    
+    private func withRetry<T>(_ operation: () async throws -> T) async throws -> T {
+        var lastError: Error?
+        
+        for attempt in 1...maxRetries {
+            do {
+                return try await operation()
+            } catch {
+                lastError = error
+                let delay = Double(attempt) * 1.0  // 1s, 2s, 3s
+                print("⚠️ Attempt \(attempt)/\(maxRetries) failed: \(friendlyError(error))")
+                
+                if attempt < maxRetries {
+                    print("⏳ Retrying in \(delay)s...")
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+        }
+        
+        throw lastError ?? NSError(domain: "LocalLLMClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error"])
+    }
+    
+    private func friendlyError(_ error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut: return "Connection timed out"
+            case .cannotConnectToHost: return "Can't connect - check server IP"
+            case .notConnectedToInternet: return "No internet"
+            case .networkConnectionLost: return "Connection lost"
+            case .cannotFindHost: return "Server not found"
+            default: return urlError.localizedDescription
+            }
+        }
+        return error.localizedDescription
     }
     
     // MARK: - Build Request
     
     private func buildRequest(history: [ChatMessage], userInput: String, imageData: Data?, stream: Bool) async throws -> URLRequest {
-        var url = baseURL.appendingPathComponent(endpointPath)
-        
-        // Fix double slashes in URL path
-        if let urlString = url.absoluteString.removingPercentEncoding {
-            let cleaned = urlString.replacingOccurrences(of: "//v1", with: "/v1")
-            if let cleanedURL = URL(string: cleaned) {
-                url = cleanedURL
-            }
-        }
+        // Get URL dynamically from settings
+        let url = await getServerURL()
         
         // Map our ChatMessage history → generic role/content messages
         var allMessages: [LLMMessage] = []
@@ -188,10 +248,10 @@ final class LocalLLMClient: LLMClient {
     // Shared session with optimized configuration for faster connections
     private static let optimizedSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForConnect = 10  // Fast connect timeout
-        config.timeoutIntervalForResource = 60
-        config.httpMaximumConnectionsPerHost = 2
-        config.waitsForConnectivity = false  // Fail fast if no connection
+        config.timeoutIntervalForRequest = 30  // Request timeout
+        config.timeoutIntervalForResource = 120  // Total time for resource
+        config.httpMaximumConnectionsPerHost = 4
+        config.waitsForConnectivity = true  // Wait for network instead of failing immediately
         return URLSession(configuration: config)
     }()
     
@@ -200,24 +260,27 @@ final class LocalLLMClient: LLMClient {
     func sendMessage(history: [ChatMessage], userInput: String, imageData: Data?) async throws -> String {
         let request = try await buildRequest(history: history, userInput: userInput, imageData: imageData, stream: false)
         
-        print("🔗 Sending non-streaming request")
-        
-        let (data, response) = try await Self.optimizedSession.data(for: request)
-        
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            let raw = String(data: data, encoding: .utf8) ?? "<no body>"
-            throw NSError(domain: "LocalLLMClient", code: status, 
-                         userInfo: [NSLocalizedDescriptionKey: "Server error \(status): \(raw.prefix(200))"])
+        return try await withRetry {
+            print("🔗 Sending non-streaming request to \(request.url?.absoluteString ?? "unknown")")
+            
+            let (data, response) = try await Self.optimizedSession.data(for: request)
+            
+            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let raw = String(data: data, encoding: .utf8) ?? "<no body>"
+                throw NSError(domain: "LocalLLMClient", code: status, 
+                             userInfo: [NSLocalizedDescriptionKey: "Server error \(status): \(raw.prefix(200))"])
+            }
+            
+            let decoded = try JSONDecoder().decode(LLMChatResponse.self, from: data)
+            guard let first = decoded.choices.first else {
+                throw NSError(domain: "LocalLLMClient", code: -2, 
+                             userInfo: [NSLocalizedDescriptionKey: "No choices in response"])
+            }
+            
+            print("✅ Response received")
+            return first.message.content
         }
-        
-        let decoded = try JSONDecoder().decode(LLMChatResponse.self, from: data)
-        guard let first = decoded.choices.first else {
-            throw NSError(domain: "LocalLLMClient", code: -2, 
-                         userInfo: [NSLocalizedDescriptionKey: "No choices in response"])
-        }
-        
-        return first.message.content
     }
     
     // MARK: - Streaming
@@ -225,57 +288,59 @@ final class LocalLLMClient: LLMClient {
     func streamMessage(history: [ChatMessage], userInput: String, imageData: Data?, onChunk: @escaping (String) -> Void) async throws -> String {
         let request = try await buildRequest(history: history, userInput: userInput, imageData: imageData, stream: true)
         
-        print("🔗 Sending streaming request")
-        
-        let (bytes, response) = try await Self.optimizedSession.bytes(for: request)
-        
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(domain: "LocalLLMClient", code: status,
-                         userInfo: [NSLocalizedDescriptionKey: "Server error \(status)"])
-        }
-        
-        var fullResponse = ""
-        
-        // Process SSE stream
-        for try await line in bytes.lines {
-            // SSE format: "data: {...}"
-            guard line.hasPrefix("data: ") else { continue }
+        return try await withRetry {
+            print("🔗 Sending streaming request to \(request.url?.absoluteString ?? "unknown")")
             
-            let jsonString = String(line.dropFirst(6)) // Remove "data: " prefix
+            let (bytes, response) = try await Self.optimizedSession.bytes(for: request)
             
-            // Check for stream end
-            if jsonString == "[DONE]" {
-                print("✅ Stream complete")
-                break
+            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                throw NSError(domain: "LocalLLMClient", code: status,
+                             userInfo: [NSLocalizedDescriptionKey: "Server error \(status)"])
             }
             
-            // Parse chunk
-            guard let jsonData = jsonString.data(using: .utf8) else { continue }
+            var fullResponse = ""
             
-            do {
-                let chunk = try JSONDecoder().decode(LLMStreamChunk.self, from: jsonData)
+            // Process SSE stream
+            for try await line in bytes.lines {
+                // SSE format: "data: {...}"
+                guard line.hasPrefix("data: ") else { continue }
                 
-                if let content = chunk.choices.first?.delta.content {
-                    fullResponse += content
-                    
-                    // Call the chunk handler on main thread
-                    await MainActor.run {
-                        onChunk(content)
-                    }
-                }
+                let jsonString = String(line.dropFirst(6)) // Remove "data: " prefix
                 
-                // Check for finish
-                if chunk.choices.first?.finish_reason != nil {
+                // Check for stream end
+                if jsonString == "[DONE]" {
+                    print("✅ Stream complete")
                     break
                 }
-            } catch {
-                // Some servers send different formats, try to be lenient
-                print("⚠️ Chunk parse error (continuing): \(error.localizedDescription)")
+                
+                // Parse chunk
+                guard let jsonData = jsonString.data(using: .utf8) else { continue }
+                
+                do {
+                    let chunk = try JSONDecoder().decode(LLMStreamChunk.self, from: jsonData)
+                    
+                    if let content = chunk.choices.first?.delta.content {
+                        fullResponse += content
+                        
+                        // Call the chunk handler on main thread
+                        await MainActor.run {
+                            onChunk(content)
+                        }
+                    }
+                    
+                    // Check for finish
+                    if chunk.choices.first?.finish_reason != nil {
+                        break
+                    }
+                } catch {
+                    // Some servers send different formats, try to be lenient
+                    print("⚠️ Chunk parse error (continuing): \(error.localizedDescription)")
+                }
             }
+            
+            print("✅ Full response: \(fullResponse.prefix(50))...")
+            return fullResponse
         }
-        
-        print("✅ Full response: \(fullResponse.prefix(50))...")
-        return fullResponse
     }
 }

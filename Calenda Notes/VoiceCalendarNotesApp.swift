@@ -12,10 +12,8 @@ struct VoiceCalendarNotesApp: App {
     @StateObject private var viewModel: ChatViewModel
     
     init() {
-        let client = LocalLLMClient(
-            baseURL: URL(string: "https://mr28.ngrok.app")!,
-            endpointPath: "/v1/chat/completions"
-        )
+        // Client reads URL dynamically from settings on each request
+        let client = LocalLLMClient()
         _viewModel = StateObject(wrappedValue: ChatViewModel(client: client))
     }
     

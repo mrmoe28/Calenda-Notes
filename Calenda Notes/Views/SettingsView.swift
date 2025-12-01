@@ -195,7 +195,7 @@ struct SettingsView: View {
                         .pickerStyle(.menu)
                     }
                     
-                    // Model Selection
+                    // Model Selection - Dynamic from server
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Model")
@@ -214,33 +214,21 @@ struct SettingsView: View {
                             }
                         }
                         
-                        // Always show dropdown - use fetched models or fallback list
-                        Picker("Select Model", selection: $settings.modelName) {
-                            if !ollamaService.availableModels.isEmpty {
+                        // Show fetched models or text field for custom model
+                        if !ollamaService.availableModels.isEmpty {
+                            Picker("Select Model", selection: $settings.modelName) {
                                 ForEach(ollamaService.availableModels) { model in
                                     Text(model.displayName).tag(model.name)
                                 }
-                            } else {
-                                // Fallback common models when server not reachable
-                                Text("qwen3:0.6b (Fastest)").tag("qwen3:0.6b")
-                                Text("qwen2.5:1.5b").tag("qwen2.5:1.5b")
-                                Text("gemma3:1b").tag("gemma3:1b")
-                                Text("qwen2.5:7b").tag("qwen2.5:7b")
-                                Text("qwen2.5-coder:7b").tag("qwen2.5-coder:7b")
-                                Text("llama3.2:1b").tag("llama3.2:1b")
-                                Text("llama3.2:3b").tag("llama3.2:3b")
-                                Text("pam:latest").tag("pam:latest")
-                                // Also include current model if not in list
-                                if !["qwen3:0.6b", "qwen2.5:1.5b", "gemma3:1b", "qwen2.5:7b", "qwen2.5-coder:7b", "llama3.2:1b", "llama3.2:3b", "pam:latest"].contains(settings.modelName) {
+                                // Always include current model in case it's not in list
+                                if !ollamaService.availableModels.contains(where: { $0.name == settings.modelName }) {
                                     Text(settings.modelName).tag(settings.modelName)
                                 }
                             }
-                        }
-                        .pickerStyle(.menu)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        // Show model info or status
-                        if !ollamaService.availableModels.isEmpty {
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            // Show model info
                             if let currentModel = ollamaService.availableModels.first(where: { $0.name == settings.modelName }) {
                                 HStack(spacing: 8) {
                                     if let params = currentModel.parameterSize {
@@ -255,14 +243,23 @@ struct SettingsView: View {
                                     }
                                 }
                             }
-                        } else if let error = ollamaService.errorMessage {
-                            Text("⚠️ \(error)")
-                                .font(.caption)
-                                .foregroundColor(.orange)
                         } else {
-                            Text("Tap ↻ to load your models from server")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            // No models fetched - allow typing custom model name
+                            TextField("Model name (e.g. llama3:8b)", text: $settings.modelName)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                            
+                            if let error = ollamaService.errorMessage {
+                                Text("⚠️ \(error)")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                            } else {
+                                Text("Tap ↻ to load models from server, or type model name")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     .padding(.vertical, 4)
@@ -485,10 +482,7 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(viewModel: ChatViewModel(client: LocalLLMClient(
-        baseURL: URL(string: "https://example.com")!,
-        endpointPath: "/v1/chat/completions"
-    )))
+    SettingsView(viewModel: ChatViewModel(client: LocalLLMClient()))
 }
 
 // MARK: - Voice Selection View

@@ -416,9 +416,6 @@ struct VoiceConversationView: View {
 }
 
 #Preview {
-    VoiceConversationView(viewModel: ChatViewModel(client: LocalLLMClient(
-        baseURL: URL(string: "https://example.com")!,
-        endpointPath: "/v1/chat/completions"
-    )))
+    VoiceConversationView(viewModel: ChatViewModel(client: LocalLLMClient()))
 }
 
