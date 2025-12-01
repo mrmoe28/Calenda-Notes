@@ -44,12 +44,14 @@ final class ChatViewModel: ObservableObject {
         📱 APPS: Open ANY app (Spotify, Instagram, Camera, Notes, Maps, etc.)
         🌤️ WEATHER: Current weather, forecasts
         👤 CONTACTS: Find, call, text anyone in contacts
-        🔍 SEARCH: Web search anything
+        🔍 SEARCH: Web search anything - find info, news, answers
         📍 MAPS: Get directions, open locations
         📞 CALLS & TEXTS: Call or message any number
         📧 EMAIL: Compose emails
         ⚙️ SETTINGS: Open phone settings
         📋 CLIPBOARD: Copy text
+        🖼️ IMAGES: Analyze photos, describe what you see, read text in images
+        📄 DOCUMENTS: Read and analyze text documents, PDFs, files
 
         ALWAYS USE ACTIONS - never say "I can't":
         [ACTION:open_app|app:calendar] - Opens calendar
@@ -78,6 +80,9 @@ final class ChatViewModel: ObservableObject {
         "Weather?" → "[ACTION:weather]"
         "Call mom" → "calling [ACTION:call_contact|name:mom]"
         "Text John hey" → "sending [ACTION:message_contact|name:John|body:hey]"
+        "Search for pizza near me" → "on it [ACTION:search|query:pizza near me]"
+        [User sends image] → Describe what you see in the image clearly
+        [User sends document] → Summarize or analyze the document content
 
         STYLE: Super casual. Say "im on it", "got it", "done", "checking". One emoji max.
         """
@@ -428,6 +433,22 @@ final class ChatViewModel: ObservableObject {
                 return .getWeatherForecast(5)
             }
             return .getWeather
+        }
+        
+        // Web search - "search for", "google", "look up"
+        let searchPhrases = ["search for", "search the web", "google", "look up", "find information", "search online"]
+        for phrase in searchPhrases {
+            if lowercased.contains(phrase) && !lowercased.contains("contact") {
+                // Extract search query
+                var query = input
+                for p in searchPhrases {
+                    query = query.replacingOccurrences(of: p, with: "", options: .caseInsensitive)
+                }
+                query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !query.isEmpty {
+                    return .search(query)
+                }
+            }
         }
         
         // Contact lookup - "find contact", "look up contact", "search contacts"
