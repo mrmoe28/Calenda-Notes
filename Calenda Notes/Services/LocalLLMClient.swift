@@ -106,86 +106,30 @@ extension LLMClient {
 }
 
 final class LocalLLMClient: LLMClient {
+    private let baseURL: URL
+    private let endpointPath: String
+    
+    // Retry configuration
     private let maxRetries = 3
+    private let baseRetryDelay: TimeInterval = 1.0
     
-    init() {
-        print("🔧 LocalLLMClient initialized (dynamic URL from settings)")
-    }
-    
-    // Legacy init for compatibility - URL is ignored, reads from settings
     init(baseURL: URL, endpointPath: String, urlSession: URLSession = .shared) {
-        print("🔧 LocalLLMClient initialized (will read URL from settings)")
-    }
-    
-    // MARK: - Dynamic URL from Settings
-    
-    private func getServerURL() async -> URL {
-        let serverURL = await MainActor.run {
-            AppSettings.shared.serverURL
-        }
-        
-        // Parse and clean the URL
-        var urlString = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Remove trailing slashes
-        while urlString.hasSuffix("/") {
-            urlString = String(urlString.dropLast())
-        }
-        
-        // Ensure we have the full chat completions endpoint
-        if !urlString.contains("/chat/completions") {
-            if urlString.hasSuffix("/v1") {
-                urlString += "/chat/completions"
-            } else {
-                urlString += "/v1/chat/completions"
-            }
-        }
-        
-        return URL(string: urlString) ?? URL(string: "http://localhost:11434/v1/chat/completions")!
-    }
-    
-    // MARK: - Retry Logic
-    
-    private func withRetry<T>(_ operation: () async throws -> T) async throws -> T {
-        var lastError: Error?
-        
-        for attempt in 1...maxRetries {
-            do {
-                return try await operation()
-            } catch {
-                lastError = error
-                let delay = Double(attempt) * 1.0  // 1s, 2s, 3s
-                print("⚠️ Attempt \(attempt)/\(maxRetries) failed: \(friendlyError(error))")
-                
-                if attempt < maxRetries {
-                    print("⏳ Retrying in \(delay)s...")
-                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                }
-            }
-        }
-        
-        throw lastError ?? NSError(domain: "LocalLLMClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error"])
-    }
-    
-    private func friendlyError(_ error: Error) -> String {
-        if let urlError = error as? URLError {
-            switch urlError.code {
-            case .timedOut: return "Connection timed out"
-            case .cannotConnectToHost: return "Can't connect - check server IP"
-            case .notConnectedToInternet: return "No internet"
-            case .networkConnectionLost: return "Connection lost"
-            case .cannotFindHost: return "Server not found"
-            default: return urlError.localizedDescription
-            }
-        }
-        return error.localizedDescription
+        self.baseURL = baseURL
+        self.endpointPath = endpointPath
     }
     
     // MARK: - Build Request
     
     private func buildRequest(history: [ChatMessage], userInput: String, imageData: Data?, stream: Bool) async throws -> URLRequest {
-        // Get URL dynamically from settings
-        let url = await getServerURL()
+        var url = baseURL.appendingPathComponent(endpointPath)
+        
+        // Fix double slashes in URL path
+        if let urlString = url.absoluteString.removingPercentEncoding {
+            let cleaned = urlString.replacingOccurrences(of: "//v1", with: "/v1")
+            if let cleanedURL = URL(string: cleaned) {
+                url = cleanedURL
+            }
+        }
         
         // Map our ChatMessage history → generic role/content messages
         var allMessages: [LLMMessage] = []
@@ -239,21 +183,91 @@ final class LocalLLMClient: LLMClient {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("keep-alive", forHTTPHeaderField: "Connection")  // Reuse connection
         request.httpBody = try JSONEncoder().encode(requestBody)
-        request.timeoutInterval = 60  // Faster timeout
-        request.cachePolicy = .reloadIgnoringLocalCacheData  // No caching delays
+        request.timeoutInterval = 120  // Generous timeout for slow models
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         
         return request
     }
     
-    // Shared session with optimized configuration for faster connections
-    private static let optimizedSession: URLSession = {
+    // Shared session with stable connection configuration
+    private static let stableSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30  // Request timeout
-        config.timeoutIntervalForResource = 120  // Total time for resource
-        config.httpMaximumConnectionsPerHost = 4
+        config.timeoutIntervalForRequest = 30  // Wait for request to complete
+        config.timeoutIntervalForResource = 180  // Total time for resource (3 mins for slow models)
+        config.httpMaximumConnectionsPerHost = 4  // Allow more parallel connections
         config.waitsForConnectivity = true  // Wait for network instead of failing immediately
+        config.allowsCellularAccess = true
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        // Keep connections alive longer
+        config.httpShouldSetCookies = false
+        config.httpShouldUsePipelining = true
         return URLSession(configuration: config)
     }()
+    
+    // MARK: - Retry Helper
+    
+    private func withRetry<T>(
+        operation: @escaping () async throws -> T,
+        retryCount: Int = 0
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            // Check if we should retry
+            let isRetryable = isRetryableError(error)
+            
+            if isRetryable && retryCount < maxRetries {
+                let delay = baseRetryDelay * pow(2.0, Double(retryCount))
+                print("⚠️ Retry \(retryCount + 1)/\(maxRetries) after \(delay)s: \(error.localizedDescription)")
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                return try await withRetry(operation: operation, retryCount: retryCount + 1)
+            }
+            
+            throw error
+        }
+    }
+    
+    private func isRetryableError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return true
+            default:
+                return false
+            }
+        }
+        
+        if let nsError = error as NSError? {
+            // Retry on connection errors
+            if nsError.domain == NSURLErrorDomain {
+                return true
+            }
+        }
+        
+        return false
+    }
+    
+    private func friendlyErrorMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "Connection timed out. Is Ollama running?"
+            case .cannotConnectToHost:
+                return "Can't reach server. Check the IP address."
+            case .notConnectedToInternet:
+                return "No internet connection."
+            case .networkConnectionLost:
+                return "Lost connection. Retrying..."
+            case .cannotFindHost:
+                return "Server not found. Check your URL."
+            default:
+                return "Network error: \(urlError.localizedDescription)"
+            }
+        }
+        return error.localizedDescription
+    }
     
     // MARK: - Non-Streaming (fallback)
     
@@ -261,9 +275,9 @@ final class LocalLLMClient: LLMClient {
         let request = try await buildRequest(history: history, userInput: userInput, imageData: imageData, stream: false)
         
         return try await withRetry {
-            print("🔗 Sending non-streaming request to \(request.url?.absoluteString ?? "unknown")")
+            print("🔗 Sending non-streaming request")
             
-            let (data, response) = try await Self.optimizedSession.data(for: request)
+            let (data, response) = try await Self.stableSession.data(for: request)
             
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -278,7 +292,6 @@ final class LocalLLMClient: LLMClient {
                              userInfo: [NSLocalizedDescriptionKey: "No choices in response"])
             }
             
-            print("✅ Response received")
             return first.message.content
         }
     }
@@ -288,10 +301,11 @@ final class LocalLLMClient: LLMClient {
     func streamMessage(history: [ChatMessage], userInput: String, imageData: Data?, onChunk: @escaping (String) -> Void) async throws -> String {
         let request = try await buildRequest(history: history, userInput: userInput, imageData: imageData, stream: true)
         
+        // Streaming with retry on connection failure
         return try await withRetry {
-            print("🔗 Sending streaming request to \(request.url?.absoluteString ?? "unknown")")
+            print("🔗 Sending streaming request")
             
-            let (bytes, response) = try await Self.optimizedSession.bytes(for: request)
+            let (bytes, response) = try await Self.stableSession.bytes(for: request)
             
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -341,6 +355,37 @@ final class LocalLLMClient: LLMClient {
             
             print("✅ Full response: \(fullResponse.prefix(50))...")
             return fullResponse
+        }
+    }
+    
+    // MARK: - Connection Health Check
+    
+    /// Quick check if the server is reachable
+    func checkConnection() async -> (isConnected: Bool, error: String?) {
+        // Extract base URL for health check
+        var baseURLString = baseURL.absoluteString
+        if baseURLString.contains("/v1") {
+            baseURLString = baseURLString.components(separatedBy: "/v1").first ?? baseURLString
+        }
+        
+        guard let healthURL = URL(string: baseURLString)?.appendingPathComponent("api/tags") else {
+            return (false, "Invalid URL")
+        }
+        
+        do {
+            var request = URLRequest(url: healthURL)
+            request.timeoutInterval = 5  // Quick health check
+            
+            let (_, response) = try await Self.stableSession.data(for: request)
+            
+            if let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode {
+                return (true, nil)
+            } else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                return (false, "Server returned \(status)")
+            }
+        } catch {
+            return (false, friendlyErrorMessage(for: error))
         }
     }
 }

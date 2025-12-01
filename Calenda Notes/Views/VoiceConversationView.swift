@@ -116,28 +116,6 @@ struct VoiceConversationView: View {
                 
                 Spacer()
                 
-                // Transcript display
-                VStack(spacing: 16) {
-                    if !currentTranscript.isEmpty {
-                        Text(currentTranscript)
-                            .font(.title3)
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                            .transition(.opacity)
-                    }
-                    
-                    if !lastResponse.isEmpty && !voiceService.isSpeaking {
-                        Text(lastResponse)
-                            .font(.body)
-                            .foregroundColor(.white.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(3)
-                            .padding(.horizontal, 32)
-                    }
-                }
-                .frame(height: 120)
-                
                 // Control buttons
                 HStack(spacing: 60) {
                     // Stop button
@@ -339,11 +317,8 @@ struct VoiceConversationView: View {
                 
                 // Use streaming for faster first response
                 var fullResponse = ""
-                fullResponse = try await viewModel.client.streamMessage(history: historyForLLM, userInput: text) { chunk in
-                    // Update last response as it streams
-                    Task { @MainActor in
-                        lastResponse = (lastResponse.isEmpty ? "" : lastResponse) + chunk
-                    }
+                fullResponse = try await viewModel.client.streamMessage(history: historyForLLM, userInput: text) { _ in
+                    // Streaming chunk received (no UI display in voice mode)
                 }
                 
                 isProcessing = false

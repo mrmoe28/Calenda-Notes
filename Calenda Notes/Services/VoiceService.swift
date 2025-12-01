@@ -7,6 +7,7 @@ import Foundation
 import AVFoundation
 import Speech
 import Combine
+import AudioToolbox
 
 // Notification for interrupt detection
 extension Notification.Name {
@@ -31,16 +32,20 @@ final class VoiceService: NSObject, ObservableObject {
     private var silenceTimer: Timer?
     private var onSpeechComplete: ((String) -> Void)?
     
-    // Interrupt detection
+    // Interrupt detection using AVAudioRecorder for metering (doesn't conflict with TTS)
     private var interruptMonitoringEnabled = false
-    private var interruptAudioLevel: Float = 0
+    private var interruptRecorder: AVAudioRecorder?
     private var interruptDetectionTimer: Timer?
     private var consecutiveHighLevels: Int = 0  // Require sustained sound to interrupt
+    private let requiredHighLevels = 3  // Need 3 consecutive high readings (~150ms)
     
-    /// Get interrupt threshold from settings (lower = more sensitive)
+    /// Get interrupt threshold from settings (lower = more sensitive, in dB: -50 to 0)
     private var interruptThreshold: Float {
         let saved = UserDefaults.standard.double(forKey: "interrupt_sensitivity")
-        return saved > 0 ? Float(saved) : 0.15
+        // Convert 0.0-1.0 setting to dB threshold (-50dB to -20dB)
+        // Lower threshold = more sensitive
+        let sensitivity = saved > 0 ? Float(saved) : 0.3
+        return -50 + (sensitivity * 30)  // 0.3 default = -41dB
     }
     
     override init() {
@@ -238,12 +243,12 @@ final class VoiceService: NSObject, ObservableObject {
             stopListening()
         }
         
-        // Configure audio session for playback only (no microphone to avoid conflicts)
+        // Configure audio session for playback + record (allows interrupt monitoring)
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("🔊 Audio session configured for playback")
+            print("🔊 Audio session configured for playback with interrupt monitoring")
         } catch {
             print("❌ Audio session error: \(error)")
             errorMessage = "Audio error: \(error.localizedDescription)"
@@ -306,30 +311,88 @@ final class VoiceService: NSObject, ObservableObject {
         stopSpeaking()
     }
     
-    // MARK: - Interrupt Detection
+    // MARK: - Interrupt Detection (uses AVAudioRecorder metering - doesn't conflict with TTS)
     
     private func startInterruptMonitoring() {
-        // DISABLED: Interrupt monitoring was causing speech to cut out
-        // The audio engine conflicts with AVSpeechSynthesizer
-        // TODO: Implement using a separate audio unit or volume metering instead
-        print("🎤 Interrupt monitoring disabled (causes speech cutoff)")
+        guard !interruptMonitoringEnabled else { return }
+        
+        // Configure audio session for playback AND record (needed for metering while speaking)
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            try audioSession.setActive(true)
+        } catch {
+            print("⚠️ Could not configure audio session for interrupt monitoring: \(error)")
+            return
+        }
+        
+        // Set up a silent recorder just for metering
+        let tempDir = FileManager.default.temporaryDirectory
+        let audioURL = tempDir.appendingPathComponent("interrupt_monitor.wav")
+        
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 44100.0,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVEncoderAudioQualityKey: AVAudioQuality.min.rawValue
+        ]
+        
+        do {
+            interruptRecorder = try AVAudioRecorder(url: audioURL, settings: settings)
+            interruptRecorder?.isMeteringEnabled = true
+            interruptRecorder?.record()
+            interruptMonitoringEnabled = true
+            consecutiveHighLevels = 0
+            
+            print("🎤 Interrupt monitoring started (threshold: \(interruptThreshold) dB)")
+            
+            // Poll audio levels every 50ms
+            interruptDetectionTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.checkInterruptLevel()
+                }
+            }
+        } catch {
+            print("⚠️ Could not start interrupt recorder: \(error)")
+        }
     }
     
-    private func setupInterruptAudioTap() {
-        // Disabled - see startInterruptMonitoring()
+    private func checkInterruptLevel() {
+        guard interruptMonitoringEnabled, let recorder = interruptRecorder, isSpeaking else { return }
+        
+        recorder.updateMeters()
+        let averagePower = recorder.averagePower(forChannel: 0)  // in dB (-160 to 0)
+        
+        // Check if audio level exceeds threshold (user is speaking)
+        if averagePower > interruptThreshold {
+            consecutiveHighLevels += 1
+            print("🎤 Audio level: \(averagePower) dB (count: \(consecutiveHighLevels)/\(requiredHighLevels))")
+            
+            if consecutiveHighLevels >= requiredHighLevels {
+                handleInterrupt()
+            }
+        } else {
+            // Reset counter if level drops
+            if consecutiveHighLevels > 0 {
+                consecutiveHighLevels = max(0, consecutiveHighLevels - 1)
+            }
+        }
     }
     
     private func stopInterruptMonitoring() {
         guard interruptMonitoringEnabled else { return }
+        
         interruptMonitoringEnabled = false
         consecutiveHighLevels = 0
         interruptDetectionTimer?.invalidate()
         interruptDetectionTimer = nil
         
-        if audioEngine.isRunning && !isListening {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        interruptRecorder?.stop()
+        interruptRecorder = nil
+        
         print("🎤 Interrupt monitoring stopped")
     }
     

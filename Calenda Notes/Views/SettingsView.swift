@@ -111,7 +111,8 @@ struct SettingsView: View {
     }
     
     private func testVoice() {
-        let utterance = AVSpeechUtterance(string: "Hey! I'm Nova, your AI assistant. How can I help you today?")
+        let userName = settings.userName
+        let utterance = AVSpeechUtterance(string: "yo \(userName)! it's Nova. what's good?")
         utterance.rate = Float(settings.voiceSpeed)
         utterance.pitchMultiplier = Float(settings.voicePitch)
         
@@ -387,6 +388,21 @@ struct SettingsView: View {
                     
                 } header: {
                     Label("Conversation", systemImage: "bubble.left.and.bubble.right")
+                }
+                
+                // MARK: - Your Profile
+                Section {
+                    HStack {
+                        Text("Your Name")
+                        Spacer()
+                        TextField("Name", text: $settings.userName)
+                            .multilineTextAlignment(.trailing)
+                            .foregroundColor(.secondary)
+                    }
+                } header: {
+                    Label("Profile", systemImage: "person.circle")
+                } footer: {
+                    Text("Nova will use your name in conversations. This persists across app restarts.")
                 }
                 
                 // MARK: - Memory Settings

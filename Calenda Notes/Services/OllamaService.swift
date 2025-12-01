@@ -84,10 +84,22 @@ final class OllamaService: ObservableObject {
     @Published var availableModels: [OllamaModel] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var isConnected = false
+    
+    private let maxRetries = 3
+    
+    // Stable session for Ollama API
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
     
     private init() {}
     
-    /// Fetch available models from Ollama server
+    /// Fetch available models from Ollama server with retry
     func fetchModels() async {
         let settings = AppSettings.shared
         
@@ -102,43 +114,110 @@ final class OllamaService: ObservableObject {
         
         guard let url = URL(string: baseURLString)?.appendingPathComponent("api/tags") else {
             errorMessage = "Invalid server URL"
+            isConnected = false
             return
         }
         
         isLoading = true
         errorMessage = nil
         
-        do {
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 30
-            
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                errorMessage = "Server returned error \(status)"
+        // Retry logic
+        for attempt in 0..<maxRetries {
+            do {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 15
+                
+                let (data, response) = try await Self.session.data(for: request)
+                
+                guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    errorMessage = "Server error \(status)"
+                    isConnected = false
+                    isLoading = false
+                    return
+                }
+                
+                let decoded = try JSONDecoder().decode(OllamaModelsResponse.self, from: data)
+                
+                // Sort models: smaller first (good for tool calling)
+                availableModels = decoded.models.sorted { model1, model2 in
+                    guard let size1 = model1.size else { return false }
+                    guard let size2 = model2.size else { return true }
+                    return size1 < size2
+                }
+                
+                isConnected = true
+                errorMessage = nil
+                print("✅ Fetched \(availableModels.count) models from Ollama")
                 isLoading = false
                 return
+                
+            } catch {
+                let friendlyError = friendlyErrorMessage(for: error)
+                
+                if attempt < maxRetries - 1 {
+                    print("⚠️ Retry \(attempt + 1)/\(maxRetries): \(friendlyError)")
+                    try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(attempt)) * 1_000_000_000))
+                } else {
+                    errorMessage = friendlyError
+                    isConnected = false
+                    print("❌ Failed to fetch models after \(maxRetries) attempts: \(error)")
+                }
             }
-            
-            let decoded = try JSONDecoder().decode(OllamaModelsResponse.self, from: data)
-            
-            // Sort models: smaller first (good for tool calling)
-            availableModels = decoded.models.sorted { model1, model2 in
-                // Prioritize models with known sizes
-                guard let size1 = model1.size else { return false }
-                guard let size2 = model2.size else { return true }
-                return size1 < size2
-            }
-            
-            print("✅ Fetched \(availableModels.count) models from Ollama")
-            
-        } catch {
-            errorMessage = "Failed to fetch models: \(error.localizedDescription)"
-            print("❌ Error fetching models: \(error)")
         }
         
         isLoading = false
+    }
+    
+    /// Quick connection check
+    func checkConnection() async -> Bool {
+        let settings = AppSettings.shared
+        var baseURLString = settings.serverURL
+        if baseURLString.hasSuffix("/v1") {
+            baseURLString = String(baseURLString.dropLast(3))
+        }
+        
+        guard let url = URL(string: baseURLString)?.appendingPathComponent("api/tags") else {
+            isConnected = false
+            return false
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5
+            
+            let (_, response) = try await Self.session.data(for: request)
+            
+            if let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode {
+                isConnected = true
+                return true
+            }
+        } catch {
+            // Silent fail for health check
+        }
+        
+        isConnected = false
+        return false
+    }
+    
+    private func friendlyErrorMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "Connection timed out - is Ollama running?"
+            case .cannotConnectToHost:
+                return "Can't connect - check IP address"
+            case .notConnectedToInternet:
+                return "No internet connection"
+            case .networkConnectionLost:
+                return "Connection lost - retrying..."
+            case .cannotFindHost:
+                return "Server not found"
+            default:
+                return "Network error"
+            }
+        }
+        return "Connection failed"
     }
     
     /// Recommended fast models that support tool calling
