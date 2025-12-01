@@ -200,13 +200,12 @@ final class VoiceService: NSObject, ObservableObject {
             stopListening()
         }
         
-        // Configure audio session for playback WITH microphone access for interrupts
+        // Configure audio session for playback only (no microphone to avoid conflicts)
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            // Use playAndRecord to allow interrupt detection while speaking
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-            print("🔊 Audio session configured for playback with interrupt detection")
+            print("🔊 Audio session configured for playback")
         } catch {
             print("❌ Audio session error: \(error)")
             errorMessage = "Audio error: \(error.localizedDescription)"
@@ -268,69 +267,14 @@ final class VoiceService: NSObject, ObservableObject {
     // MARK: - Interrupt Detection
     
     private func startInterruptMonitoring() {
-        guard !interruptMonitoringEnabled else { return }
-        interruptMonitoringEnabled = true
-        consecutiveHighLevels = 0
-        
-        print("🎤 Starting interrupt monitoring (threshold: \(interruptThreshold))")
-        
-        // Small delay to let the speaker audio stabilize before monitoring
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.setupInterruptAudioTap()
-        }
+        // DISABLED: Interrupt monitoring was causing speech to cut out
+        // The audio engine conflicts with AVSpeechSynthesizer
+        // TODO: Implement using a separate audio unit or volume metering instead
+        print("🎤 Interrupt monitoring disabled (causes speech cutoff)")
     }
     
     private func setupInterruptAudioTap() {
-        guard interruptMonitoringEnabled else { return }
-        
-        do {
-            // Install tap for monitoring voice input
-            let inputNode = audioEngine.inputNode
-            let recordingFormat = inputNode.outputFormat(forBus: 0)
-            
-            // Remove existing tap if any
-            inputNode.removeTap(onBus: 0)
-            
-            inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { [weak self] buffer, _ in
-                guard let self = self else { return }
-                
-                // Calculate audio level using RMS for better accuracy
-                let channelData = buffer.floatChannelData?[0]
-                let frameLength = Int(buffer.frameLength)
-                var sumSquares: Float = 0
-                for i in 0..<frameLength {
-                    let sample = channelData?[i] ?? 0
-                    sumSquares += sample * sample
-                }
-                let rms = sqrt(sumSquares / Float(frameLength))
-                let normalizedLevel = min(rms * 30, 1.0)
-                
-                DispatchQueue.main.async {
-                    self.interruptAudioLevel = normalizedLevel
-                    
-                    // Require sustained sound to avoid speaker feedback triggering interrupt
-                    if self.isSpeaking {
-                        if normalizedLevel > self.interruptThreshold {
-                            self.consecutiveHighLevels += 1
-                            // Require 3 consecutive high levels (~150ms of sustained speech)
-                            if self.consecutiveHighLevels >= 3 {
-                                self.handleInterrupt()
-                            }
-                        } else {
-                            self.consecutiveHighLevels = 0
-                        }
-                    }
-                }
-            }
-            
-            audioEngine.prepare()
-            try audioEngine.start()
-            print("🎤 Interrupt monitoring active")
-            
-        } catch {
-            print("❌ Interrupt monitoring error: \(error)")
-            interruptMonitoringEnabled = false
-        }
+        // Disabled - see startInterruptMonitoring()
     }
     
     private func stopInterruptMonitoring() {
@@ -367,18 +311,34 @@ final class VoiceService: NSObject, ObservableObject {
 // MARK: - AVSpeechSynthesizerDelegate
 
 extension VoiceService: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        print("🔊 Speech started")
+    }
+    
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        print("🔊 Speech finished normally")
         Task { @MainActor in
             self.isSpeaking = false
+            self.stopInterruptMonitoring()
             self.speakCompletion?()
             self.speakCompletion = nil
         }
     }
     
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        print("⚠️ Speech was cancelled!")
         Task { @MainActor in
             self.isSpeaking = false
+            self.stopInterruptMonitoring()
         }
+    }
+    
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
+        print("⏸️ Speech paused")
+    }
+    
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
+        print("▶️ Speech continued")
     }
 }
 
